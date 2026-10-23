@@ -68,3 +68,17 @@ The 2026-10-23 Niightsiide replay captured 2,159 valid, continuously sequenced J
 **In-zone Waypoint warps produce transient incompatible coordinates:** in the replay the new-area entities arrived while the observer's pre-warp position was still reported (~350-390 coordinate units from those entities); moments later, old-area entities disappeared while the observer was at the destination. These raw events are preserved intentionally. Visibility-radius analysis must exclude observations near in-zone warp requests and subsequent large-position discontinuities; it must not interpret those transient distances as visibility limits. Entity identities/coordinates remain useful once the position has settled.
 
 The Task Delegator menu remained open for approximately 129 seconds in the replay, outlasting the former 120-second correlation TTL. A longer timeout for explicitly opened menus is covered by an offline regression test; no additional game capture is needed for that boundary case.
+
+## Server-side permanent collection (in progress)
+
+The optional `feature/server-ingestion` branch adds a **separate** Python 3
+standard-library server and uploader. The Windower Lua recorder remains local,
+passive, and unchanged. The Docker service archives original JSONL upload batches,
+imports validated events into SQLite, and deduplicates by `session + sequence`;
+a Windows-side uploader follows every configured capture directory using a durable
+byte-offset checkpoint and network retries.
+
+See [deployment and backfill instructions](docs/ingestion.md), including
+private-LAN binding, an explicit secret token, backup requirements and a
+server-side integration test suite. No server deployment occurs automatically
+when upgrading the Windower addon.

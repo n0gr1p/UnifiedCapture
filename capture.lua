@@ -183,56 +183,84 @@ local function npc_identity(self, id, index)
     return mob
 end
 
+local RELEASE_GRACE = 2.0
+local MENU_OPEN_JOIN_WINDOW = 5.0
 local function menu_is_current(self, at, target, menu_id, zone)
     local m = self.menu
     if not m or at - m.last > MENU_TTL then return false end
+    if m.released_at and at - m.released_at > RELEASE_GRACE then return false end
     if zone and m.zone and zone ~= m.zone then return false end
     if target and m.target and target ~= m.target then return false end
     if menu_id and m.menu_id and menu_id ~= m.menu_id then return false end
     return true
 end
 
+local function begin_menu(self, at, target, menu_id, zone, origin)
+    self.menu_counter = self.menu_counter + 1
+    self.menu = {id=self.menu_counter, target=target, menu_id=menu_id,
+        zone=zone, opened_at=at, last=at, origin=origin, has_open=false}
+    return self.menu
+end
+
 local function observe_menu(self, direction, id, p, e, at, zone)
+    -- Outgoing action category 0 is the preceding NPC interaction request;
+    -- some Home Point/Waypoint dialogues have no observed 0x032/0x033/0x034.
+    local is_request = direction == 'outgoing' and id == 0x01A and
+        e.category == 0 and e.target_id ~= nil and e.target_id > 0
     local is_open = direction == 'incoming' and (id == 0x032 or id == 0x033 or id == 0x034)
     local is_choice = direction == 'outgoing' and (id == 0x05B or id == 0x05C)
     local is_release = direction == 'incoming' and id == 0x052
     local is_params = direction == 'incoming' and id == 0x05C
-    if not (is_open or is_choice or is_release or is_params) then return end
+    if not (is_request or is_open or is_choice or is_release or is_params) then return end
     local target, menu_id = e.target_id, e.menu_id
-    if is_open then
-        -- Multiple packet variants describing one menu share an interaction ID.
-        if not menu_is_current(self, at, target, menu_id, zone) or
-            at - (self.menu.opened_at or 0) > 5.0 then
-            self.menu_counter = self.menu_counter + 1
-            self.menu = {id=self.menu_counter, target=target,
-                menu_id=menu_id, zone=zone, opened_at=at, last=at}
+    local current = menu_is_current(self, at, target, menu_id, zone)
+    if is_request then
+        begin_menu(self,at,target,nil,zone,'interaction_request')
+        e.interaction_stage = 'interaction_request'
+    elseif is_open then
+        if not current or self.menu.released_at or
+           (self.menu.origin ~= 'interaction_request' and
+            at - self.menu.opened_at > MENU_OPEN_JOIN_WINDOW) then
+            begin_menu(self,at,target,menu_id,zone,'menu_open')
         else
-            self.menu.last = at
+            self.menu.last=at
+            self.menu.target=self.menu.target or target
+            self.menu.menu_id=self.menu.menu_id or menu_id
         end
-        e.interaction_stage = 'menu_open'
+        self.menu.has_open=true
+        e.interaction_stage='menu_open'
     elseif is_choice then
-        if not menu_is_current(self, at, target, menu_id, zone) then
-            -- Preserve orphan choices; they may arrive without an observed menu.
-            self.menu_counter = self.menu_counter + 1
-            self.menu = {id=self.menu_counter, target=target, menu_id=menu_id,
-                zone=zone, opened_at=at, last=at}
-            e.interaction_correlation = 'choice_without_open'
+        if not current then
+            begin_menu(self,at,target,menu_id,zone,'choice_without_open')
+            e.interaction_correlation='choice_without_open'
         else
-            e.interaction_correlation = 'matched_menu'
-            self.menu.last = at
+            self.menu.last=at
+            self.menu.released_at=nil
+            self.menu.target=self.menu.target or target
+            self.menu.menu_id=self.menu.menu_id or menu_id
+            e.interaction_correlation=self.menu.has_open and 'matched_menu' or
+                (self.menu.origin=='interaction_request' and 'matched_request' or 'matched_choice')
         end
-        e.interaction_stage = id == 0x05C and 'warp_request' or 'menu_choice'
+        e.interaction_stage=id==0x05C and 'warp_request' or 'menu_choice'
     elseif is_release then
-        e.interaction_stage = 'menu_release'
+        e.interaction_stage='menu_release'
     elseif is_params then
-        e.interaction_stage = 'menu_parameters'
+        e.interaction_stage='menu_parameters'
     end
-    if menu_is_current(self, at, target, menu_id, zone) then
-        e.interaction_id = self.menu.id
-        e.interaction_target_id = self.menu.target
-        e.interaction_menu_id = self.menu.menu_id
+    if menu_is_current(self,at,target,menu_id,zone) then
+        local m=self.menu
+        e.interaction_id=m.id
+        e.interaction_target_id=m.target
+        e.interaction_menu_id=m.menu_id
+        e.interaction_origin=m.origin
     end
-    if is_release then self.menu = nil end
+    if is_release and current then
+        -- 0x052 release is not necessarily the final menu event; in the
+        -- observed HP flow parameters and another choice follow ~8ms later.
+        -- Retain context briefly to group this continuation, not forever.
+        self.menu.last=at
+        self.menu.released_at=at
+    end
 end
 
 function P:packet(direction, id, bytes, injected, blocked)

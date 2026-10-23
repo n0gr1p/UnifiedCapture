@@ -5,11 +5,13 @@ import math
 import os
 import sqlite3
 import tempfile
+import threading
 from pathlib import Path
 
 MAX_BODY_BYTES = 1024 * 1024
 MAX_RECORDS = 2048
 SCHEMA_VERSION = 1
+INGEST_LOCK = threading.RLock()
 
 
 class IngestError(ValueError):
@@ -30,6 +32,11 @@ def initialize(db_path):
     path.parent.mkdir(parents=True, exist_ok=True)
     with connection(path) as db:
         db.executescript("""
+        CREATE TABLE IF NOT EXISTS imported_batches (
+            sha256 TEXT PRIMARY KEY,
+            record_count INTEGER NOT NULL,
+            imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
         CREATE TABLE IF NOT EXISTS sessions (
             session TEXT PRIMARY KEY,
             character TEXT,
@@ -162,7 +169,7 @@ def archive_bytes(archive_dir, raw):
     return digest
 
 
-def import_batch(db_path, records, source_file=None):
+def import_batch(db_path, records, source_file=None, digest=None):
     """Single SQLite transaction. Replaying the same batch is idempotent."""
     inserted = duplicates = 0
     with connection(db_path) as db:
@@ -218,7 +225,23 @@ def import_batch(db_path, records, source_file=None):
                      number(obj, "interaction_target_id"), number(obj, "interaction_menu_id"),
                      number(obj, "packet_id"), number(obj, "option_index")))
             inserted += 1
+        if digest:
+            db.execute(
+                "INSERT OR IGNORE INTO imported_batches(sha256, record_count) VALUES (?,?)",
+                (digest, len(records)))
     return {"inserted": inserted, "duplicates": duplicates}
+
+
+def check_conflicts(db_path, records):
+    """Reject changed-payload retries before they enter the immutable archive."""
+    with connection(db_path) as db:
+        for obj in records:
+            old = db.execute(
+                "SELECT raw_json FROM events WHERE session=? AND sequence=?",
+                (obj["session"], obj["sequence"])).fetchone()
+            if old and old[0] != json.dumps(
+                obj, ensure_ascii=False, sort_keys=True, separators=(",", ":")):
+                raise IngestError("Conflicting payload for existing session/sequence")
 
 
 def ingest(db_path, archive_dir, raw, source_file=None):
@@ -228,20 +251,28 @@ def ingest(db_path, archive_dir, raw, source_file=None):
         not isinstance(source_file, str) or len(source_file) > 160 or
         any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-" for c in source_file)):
         raise IngestError("Invalid source file label")
-    digest = archive_bytes(archive_dir, raw)
-    result = import_batch(db_path, records, source_file)
+    # A single-server lock also keeps preflight and archive/SQL commit ordered.
+    # This prevents conflicting retries from poisoning the recovery archive.
+    with INGEST_LOCK:
+        check_conflicts(db_path, records)
+        digest = archive_bytes(archive_dir, raw)
+        result = import_batch(db_path, records, source_file, digest)
     return dict(result, count=len(records), sha256=digest)
 
 
 def recover(db_path, archive_dir):
-    """Repair crash-after-archive-before-SQLite on service startup."""
+    """Reconcile only batches lacking a committed SQLite batch ledger row."""
+    with connection(db_path) as db:
+        imported = {row[0] for row in db.execute("SELECT sha256 FROM imported_batches")}
     total = 0
     for path in sorted((Path(archive_dir) / "batches").glob("*.jsonl")):
+        if path.stem in imported:
+            continue
         raw = path.read_bytes()
         if path.stem != hashlib.sha256(raw).hexdigest():
             raise IngestError("Archive checksum mismatch: " + path.name)
-        # Do not silently skip corrupt evidence or conflicting session IDs.
-        total += import_batch(db_path, parse_batch(raw))["inserted"]
+        # Never silently discard corrupt evidence or conflicting session IDs.
+        total += import_batch(db_path, parse_batch(raw), digest=path.stem)["inserted"]
     return total
 
 

@@ -16,6 +16,7 @@ local PACKETS = {
 }
 local ENTITY_PACKETS = { [0x05B] = true, [0x00E] = true, [0x065] = true }
 local MENU_TTL = 120.0
+local OPEN_MENU_TTL = 600.0  -- User may remain in an explicitly opened NPC menu for minutes.
 local function finite(v)
     v = tonumber(v)
     if not v or v ~= v or v == math.huge or v == -math.huge then return nil end
@@ -187,7 +188,9 @@ local RELEASE_GRACE = 2.0
 local MENU_OPEN_JOIN_WINDOW = 5.0
 local function menu_is_current(self, at, target, menu_id, zone)
     local m = self.menu
-    if not m or at - m.last > MENU_TTL then return false end
+    if not m then return false end
+    local ttl = m.has_open and not m.released_at and OPEN_MENU_TTL or MENU_TTL
+    if at - m.last > ttl then return false end
     if m.released_at and at - m.released_at > RELEASE_GRACE then return false end
     if zone and m.zone and zone ~= m.zone then return false end
     if target and m.target and target ~= m.target then return false end

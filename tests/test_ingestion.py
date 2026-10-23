@@ -98,6 +98,11 @@ class StoreTests(unittest.TestCase):
         altered = ndjson(dict(self.rows[0], character="Different"))
         with self.assertRaisesRegex(storage.IngestError, "Conflicting"):
             storage.ingest(self.db, self.archive, altered)
+        # Conflicting retries must not poison permanent recovery evidence.
+        self.assertEqual(len(list((self.archive / "batches").glob("*.jsonl"))), 1)
+        self.assertEqual(storage.recover(self.db, self.archive), 0)
+        with sqlite3.connect(self.db) as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM imported_batches").fetchone()[0], 1)
 
 
 class UploaderTests(StoreTests):

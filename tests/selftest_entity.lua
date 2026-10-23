@@ -84,6 +84,79 @@ t:observe(0x00E,{NPC=3003,Index=81,Mask=4,['HP %']=0},262,1401)
 local stale=t:observe(0x00E,{NPC=3003,Index=81,Mask=32},262,1420)
 assert(stale and stale.death_signal==nil and stale.last_hp_age>=19)
 
+-- Canonical-name regression using the oscillation observed in Marjami Ravine.
+-- A truncated 0x00E name is provisional; it must be replaced by a verified
+-- Windower mob name when the cache becomes ready, then never downgraded.
+local names=Tracker.new()
+local cache_ready=false
+local lookup_calls=0
+local function cliff_lookup(id)
+    lookup_calls=lookup_calls+1
+    if not cache_ready then return nil end
+    return {id=id,index=201,name='Cliffclinger Toad',spawn_type=16}
+end
+local short=names:observe(0x00E,{NPC=8101,Index=201,Mask=9,
+    Name='CliffclingerTo',X=4,Y=5,Z=6},266,1600,cliff_lookup)
+assert(short.entity_name=='CliffclingerTo' and
+    short.entity_name_source=='packet_update')
+assert(names:observe(0x00E,{NPC=8101,Index=201,Mask=8,
+    Name='CliffclingerTo'},266,1600.4,cliff_lookup)==nil)
+assert(lookup_calls==1,'initial provisional name lookup should be throttled')
+cache_ready=true
+local canonical=names:observe(0x00E,{NPC=8101,Index=201,Mask=8,
+    Name='CliffclingerTo'},266,1603.1,cliff_lookup)
+assert(canonical.observation_kind=='identity_update')
+assert(canonical.entity_name=='Cliffclinger Toad' and
+    canonical.entity_name_source=='windower_mob')
+local churn=names:observe(0x00E,{NPC=8101,Index=201,Mask=8,
+    Name='CliffclingerTo'},266,1603.6,cliff_lookup)
+assert(churn==nil,'later truncated packet cannot overwrite canonical name')
+assert(lookup_calls==2,'resolved canonical names need no further lookups')
+local heartbeat=names:observe(0x00E,{NPC=8101,Index=201,Mask=0},
+    266,1609,cliff_lookup)
+assert(heartbeat.observation_kind=='still_visible' and
+    heartbeat.entity_name=='Cliffclinger Toad')
+local disappeared=names:observe(0x00E,{NPC=8101,Index=201,Mask=32},
+    266,1610,cliff_lookup)
+assert(disappeared.entity_name=='Cliffclinger Toad' and
+    disappeared.entity_name_source=='windower_mob')
+
+-- When the cache is immediately ready, the very first sighting uses the
+-- complete name; a subsequent NPC packet cannot alter it.
+local dirt=names:observe(0x00E,{NPC=8102,Index=202,Mask=9,
+    Name='DirtcakedJagil',X=7,Y=8,Z=9},266,1700,function(id)
+        return {id=id,index=202,name='Dirtcaked Jagil',spawn_type=16}
+    end)
+assert(dirt.entity_name=='Dirtcaked Jagil' and
+    dirt.entity_name_source=='windower_mob')
+assert(names:observe(0x00E,{NPC=8102,Index=202,Mask=8,
+    Name='DirtcakedJagil'},266,1701)==nil)
+
+-- A fully identified monster is still eligible for cache-name enrichment
+-- when only a truncated packet name was available earlier.
+local lookup_ready=false
+local known=names:observe(0x05B,{ID=8103,Index=203,Type=3,
+    X=1,Y=2,Z=3},266,1800,function() return nil end)
+local provisional=names:observe(0x00E,{NPC=8103,Index=203,Mask=8,
+    Name='WhisperingTwit'},266,1800.2,function() return nil end)
+assert(provisional.entity_name_source=='packet_update')
+lookup_ready=true
+local complete=names:observe(0x00E,{NPC=8103,Index=203,Mask=8,
+    Name='WhisperingTwit'},266,1803.5,function(id)
+        return {id=id,index=203,name='Whispering Twitherym',spawn_type=16}
+    end)
+assert(complete.entity_kind=='monster' and
+    complete.entity_name=='Whispering Twitherym' and
+    complete.entity_name_source=='windower_mob')
+
+-- The mob lookup must identify the exact entity, not a recycled index.
+local mismatch=names:observe(0x00E,{NPC=8104,Index=204,Mask=9,
+    Name='SmallPacketName',X=1,Y=1,Z=1},266,1900,function(id)
+        return {id=id,index=999,name='Unrelated Entity',spawn_type=16}
+    end)
+assert(mismatch.entity_name=='SmallPacketName' and
+    mismatch.entity_name_source=='packet_update')
+
 -- Recorder-level tests for schema, observer-at-packet synchronization,
 -- classification, multi-packet menu correlation, and zone/session reset.
 local capture = require('capture')
@@ -161,7 +234,7 @@ c:stop('test')
 io.open = oldopen
 local jsonl=table.concat(rows)
 assert(jsonl:find('"schema":2',1,true))
-assert(jsonl:find('"recorder_version":"0.2.1"',1,true))
+assert(jsonl:find('"recorder_version":"0.2.2"',1,true))
 assert(jsonl:find('"packet_id":91',1,true) and jsonl:find('"entity_kind":"monster"',1,true))
 assert(jsonl:find('"observer_x":5',1,true), 'original observer position preserved')
 assert(jsonl:find('"observation_kind":"last_seen"',1,true))

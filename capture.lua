@@ -8,6 +8,8 @@ local MIN_DISTANCE = 0.35
 local MAX_GAP = 4.0
 local WARP_DISTANCE = 35.0
 local FLUSH_INTERVAL = 2.0
+local ROTATE_SECONDS = 24 * 60 * 60
+local ROTATE_BYTES = 64 * 1024 * 1024
 local PACKETS = {
     outgoing = { [0x01A] = 'action_request', [0x05B] = 'menu_selection', [0x05C] = 'warp_request', [0x05E] = 'zone_request' },
     incoming = { [0x032] = 'npc_menu', [0x033] = 'npc_menu_string',
@@ -62,6 +64,7 @@ end
 function M.new(env)
     return setmetatable({env=env, active=false, last=nil, pending={}, last_sample=0,
         last_flush=0, seq=0, session=nil, file=nil, failures=0,
+        bytes_written=0, session_started_at=0, segment_serial=0,
         entities=entity_tracker.new(), entity_zone=nil, menu=nil, menu_counter=0}, P)
 end
 function P:emit(kind, data, at, observer)
@@ -95,13 +98,68 @@ end
 function P:flush()
     if not self.file or #self.pending == 0 then return end
     local data = table.concat(self.pending)
-    local ok = pcall(function() self.file:write(data); self.file:flush() end)
-    if ok then self.pending = {} else
+    local ok = pcall(function()
+        local written, write_err = self.file:write(data)
+        if not written then error(tostring(write_err or 'write failed')) end
+        local flushed, flush_err = self.file:flush()
+        if not flushed then error(tostring(flush_err or 'flush failed')) end
+    end)
+    if ok then
+        self.bytes_written = (self.bytes_written or 0) + #data
+        self.pending = {}
+    else
         self.failures = self.failures + 1
         if self.env.log then self.env.log('Write failure; capture stopped (buffer retained)') end
         self.active = false
     end
     self.last_flush = self.env.now()
+end
+local function session_id(self, character)
+    self.segment_serial = self.segment_serial + 1
+    return safe(character) .. '_' .. os.date('!%Y%m%dT%H%M%SZ') .. '_' ..
+        tostring(math.floor((self.env.now() % 1)*1000000)) .. '_' ..
+        tostring(self.segment_serial)
+end
+local function capture_directory(self)
+    local base = self.env.path .. 'data/'
+    local dir = base .. 'captures/'
+    if not self.env.dir_exists(base) then self.env.create_dir(base) end
+    if not self.env.dir_exists(dir) then self.env.create_dir(dir) end
+    return dir
+end
+local function begin_segment(self, file, id)
+    self.file, self.active, self.session = file, true, id
+    self.last, self.pending, self.seq, self.bytes_written = nil, {}, 0, 0
+    self.entities = entity_tracker.new()
+    self.entity_zone, self.menu, self.menu_counter = nil, nil, 0
+    self.last_sample, self.last_flush = 0, self.env.now()
+    self.session_started_at = self.env.now()
+    self:emit('session_start', {schema=2, recorder_version='0.2.3'})
+    self:tick(true)
+end
+function P:rotate(reason)
+    if not self.active then return false end
+    local snap = snapshot(self)
+    if not snap then return false end -- Do not end a session without an anchor.
+    -- Open the replacement first so failure cannot end an otherwise healthy capture.
+    local id = session_id(self, snap.character)
+    local pathname = capture_directory(self) .. id .. '.jsonl'
+    local replacement, err = io.open(pathname, 'a')
+    if not replacement then
+        self.env.log('Rotation deferred: ' .. tostring(err))
+        return false
+    end
+    local old_id = self.session
+    self:emit('session_stop', {reason=reason})
+    self:flush()
+    if not self.active or #self.pending > 0 then
+        pcall(function() replacement:close() end)
+        return false
+    end
+    pcall(function() self.file:close() end)
+    begin_segment(self, replacement, id)
+    self.env.log('Rotated ' .. old_id .. ' (' .. reason .. ') to ' .. id)
+    return true
 end
 function P:start()
     if self.active then return end
@@ -110,22 +168,11 @@ function P:start()
         self.env.log('Waiting for character and valid position; retry //ucap on')
         return
     end
-    local base = self.env.path .. 'data/'
-    local dir = base .. 'captures/'
-    if not self.env.dir_exists(base) then self.env.create_dir(base) end
-    if not self.env.dir_exists(dir) then self.env.create_dir(dir) end
-    local stamp = os.date('!%Y%m%dT%H%M%SZ')
-    self.session = safe(s.character) .. '_' .. stamp .. '_' .. tostring(math.floor((self.env.now() % 1)*1000000))
-    local f, err = io.open(dir .. self.session .. '.jsonl', 'a')
+    local id = session_id(self, s.character)
+    local f, err = io.open(capture_directory(self) .. id .. '.jsonl', 'a')
     if not f then self.env.log('Cannot open capture: ' .. tostring(err)); return end
-    self.file, self.active = f, true
-    self.last, self.pending, self.seq = nil, {}, 0
-    self.entities = entity_tracker.new()
-    self.entity_zone, self.menu, self.menu_counter = nil, nil, 0
-    self.last_sample, self.last_flush = 0, self.env.now()
-    self:emit('session_start', {schema=2, recorder_version='0.2.2'})
-    self:tick(true)
-    self.env.log('Recording to data/captures/' .. self.session .. '.jsonl')
+    begin_segment(self, f, id)
+    self.env.log('Recording to data/captures/' .. id .. '.jsonl')
 end
 function P:tick(force)
     if not self.active then return end
@@ -158,6 +205,13 @@ function P:tick(force)
         end
     end
     if now-self.last_flush >= FLUSH_INTERVAL then self:flush() end
+    if not force and self.active then
+        if now-self.session_started_at >= ROTATE_SECONDS then
+            self:rotate('rotation_duration')
+        elseif self.bytes_written >= ROTATE_BYTES then
+            self:rotate('rotation_size')
+        end
+    end
 end
 function P:zone_change(new_zone, old_zone)
     if not self.active then return end
@@ -334,7 +388,7 @@ function P:stop(reason)
     self.env.log('Stopped; ' .. tostring(self.seq) .. ' events')
 end
 function P:status()
-    self.env.log(self.active and ('Recording ' .. self.session .. ', events=' .. self.seq .. ', queued=' .. #self.pending)
+    self.env.log(self.active and ('Recording ' .. self.session .. ', events=' .. self.seq .. ', bytes=' .. self.bytes_written .. ', queued=' .. #self.pending)
         or ('Inactive; write_failures=' .. self.failures))
 end
 return M

@@ -153,7 +153,7 @@ def main():
                    help="Upload all available complete lines, then exit")
     args = p.parse_args()
     token = os.getenv("UCAP_API_TOKEN", "")
-    if len(token) < 16:
+    if len(token) < 16 or token.startswith("REPLACE_"):
         p.error("Set UCAP_API_TOKEN environment variable (at least 16 characters)")
     if not args.server.startswith(("http://", "https://")):
         p.error("--server must be an http:// or https:// URL")

@@ -148,6 +148,7 @@ clock=clock+0.015
 c:packet('incoming',0x05C,'params',false,false)
 c:packet('outgoing',0x05B,'choice',false,false)
 assert(c.menu.id==seeded,'post-release menu continuation must retain request ID')
+c:packet('incoming',0x052,'release',false,false)
 clock=clock+3
 c:packet('outgoing',0x05B,'choice',false,false)
 assert(c.menu.id~=seeded,'late choice must open separate interaction')

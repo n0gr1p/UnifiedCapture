@@ -20,7 +20,7 @@ Append-only JSONL records; each line has timestamp, session, sequence, optional 
 - `entity_id`, `entity_index`, `entity_epoch` (local visibility-window counter)
 - `entity_type` (raw spawn packet type when available), `windower_spawn_type` (mob-cache type when available), `entity_kind` and `entity_kind_source` (notably Windower spawn type 16 = monster; packet type 3 = monster, packet type 0 = ambiguous NPC/casket)
 - `entity_x/y/z` and `position_source` (`packet` or `last_known`)
-- `entity_name` if learned from a named update or later live lookup; the 0x05B spawn packet itself **does not contain a name**
+- `entity_name` and `entity_name_source` (`packet_update` means provisional; `windower_mob` means a matching name was verified from Windower's mob cache). Once a verified Windower name is available, a later shortened packet name cannot overwrite it. The recorder continues throttled cache lookups while a packet-sourced name remains provisional. The 0x05B spawn packet itself **does not contain a name**
 - `observer_x/y/z`, `zone`, `character`, timestamp, packet ID and injection status
 
 Incoming `0x05B` is a **spawn/appearance**, never a menu response; `0x00E` is an NPC update with a field mask; `0x065` can refine the position of an already tracked entity. Updates lacking the position bit cannot replace stored coordinates with zeroes. Repeated identical appearance/update packets are suppressed while identity changes, movement and periodic five-second confirmation are retained; never count repeated packets as additional mobs. Classifications are retried when the entity cache becomes available.
@@ -53,6 +53,10 @@ lua5.1 tests/selftest.lua
 lua5.1 tests/selftest_entity.lua
 ```
 
-## v0.2.1 live acceptance details
+## v0.2.2 live acceptance details
 
 After the repeat run, inspect monster classification rates on 0x00E-first sightings, the number of distinct IDs versus periodic `still_visible` records, last-seen death-signal evidence near the Broadleaf Palm, and whether Home Point/Waypoint interaction requests, choices and releases share interaction IDs. Short-range disappearances without death context remain ambiguous and must not be used as automatic visibility-radius ground truth.
+
+### Canonical-name regression (v0.2.2)
+
+The Marjami Ravine capture showed names alternating between abbreviated packet values and complete cache values (e.g. `CliffclingerTo` versus `Cliffclinger Toad`, `DirtcakedJagil` versus `Dirtcaked Jagil`). Verified Windower names now take precedence permanently for that entity visibility window, while packet-only names remain tagged provisional until the cache can resolve them. Earlier provisional sightings can be joined to later canonical observations by zone, entity ID/index and visibility epoch during offline import; no name is guessed from a truncated string.

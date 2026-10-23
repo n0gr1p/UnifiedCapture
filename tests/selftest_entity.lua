@@ -225,6 +225,24 @@ c:packet('incoming',0x052,'release',false,false)
 clock=clock+3
 c:packet('outgoing',0x05B,'choice',false,false)
 assert(c.menu.id~=seeded,'late choice must open separate interaction')
+-- A real Task Delegator menu was left open for 129.5 seconds in the
+-- v0.2.2 acceptance trace. It must retain its interaction ID even though
+-- ordinary unconfirmed/orphan contexts expire after 120 seconds.
+clock=clock+1
+c:packet('outgoing',0x01A,'request',false,false)
+c:packet('incoming',0x032,'menu32',false,false)
+local long_open=c.menu.id
+assert(c.menu.has_open)
+clock=clock+130
+c:packet('outgoing',0x05B,'choice',false,false)
+assert(c.menu.id==long_open and c.menu.has_open,
+    'real open menu must survive 130 seconds of user dwell')
+c:packet('incoming',0x052,'release',false,false)
+clock=clock+3
+c:packet('outgoing',0x05B,'choice',false,false)
+assert(c.menu.id~=long_open,
+    'released menu must not retain the long-open timeout')
+
 local before = c.seq
 c:packet('incoming',0x05B,'spawn',false,true)
 assert(c.seq == before, 'blocked packets not recorded')

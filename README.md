@@ -29,7 +29,7 @@ An incoming `0x00E` mask bit 2 provides HP/status context, held in memory only. 
 
 ### NPC menu lifecycle
 
-The recorder also captures the metadata of incoming `0x032`/`0x033`/`0x034` menu opens, incoming `0x05C` supplementary menu parameters (without raw menu data), outgoing `0x05B` choices, outgoing `0x05C` warp requests, and incoming `0x052` releases. Outgoing `0x01A` category 0 interactions seed an interaction even when no menu-open packet arrives. A release is retained for a brief two-second continuation window because observed Home Point flows can resume with a further menu choice. Correlated events have `interaction_id` (within a capture session), `interaction_stage`, `interaction_origin`, and matching NPC/menu identifiers when available. This is **packet correlation**, not proof of successful interaction. Menu contexts expire after two minutes and reset when zoning; orphan choices remain recorded.
+The recorder also captures the metadata of incoming `0x032`/`0x033`/`0x034` menu opens, incoming `0x05C` supplementary menu parameters (without raw menu data), outgoing `0x05B` choices, outgoing `0x05C` warp requests, and incoming `0x052` releases. Outgoing `0x01A` category 0 interactions seed an interaction even when no menu-open packet arrives. A release is retained for a brief two-second continuation window because observed Home Point flows can resume with a further menu choice. Correlated events have `interaction_id` (within a capture session), `interaction_stage`, `interaction_origin`, and matching NPC/menu identifiers when available. This is **packet correlation**, not proof of successful interaction. Unconfirmed menu contexts expire after two minutes; an explicitly opened menu remains correlatable for up to ten minutes of user dwell. A release still has only a two-second continuation window. All contexts reset when zoning; orphan choices remain recorded.
 
 ### Known limits and safety
 
@@ -60,3 +60,11 @@ After the repeat run, inspect monster classification rates on 0x00E-first sighti
 ### Canonical-name regression (v0.2.2)
 
 The Marjami Ravine capture showed names alternating between abbreviated packet values and complete cache values (e.g. `CliffclingerTo` versus `Cliffclinger Toad`, `DirtcakedJagil` versus `Dirtcaked Jagil`). Verified Windower names now take precedence permanently for that entity visibility window, while packet-only names remain tagged provisional until the cache can resolve them. Earlier provisional sightings can be joined to later canonical observations by zone, entity ID/index and visibility epoch during offline import; no name is guessed from a truncated string.
+
+## v0.2.2 live acceptance findings
+
+The 2026-10-23 Niightsiide replay captured 2,159 valid, continuously sequenced JSONL events over ~9m05s, including 1,474 entity observations and 613 position records. No verified Windower name ever reverted to an abbreviated packet name within an entity visibility window. Packet-only provisional names remain explicitly tagged. 53 distinct monster IDs were resolved through Windower's mob type.
+
+**In-zone Waypoint warps produce transient incompatible coordinates:** in the replay the new-area entities arrived while the observer's pre-warp position was still reported (~350-390 coordinate units from those entities); moments later, old-area entities disappeared while the observer was at the destination. These raw events are preserved intentionally. Visibility-radius analysis must exclude observations near in-zone warp requests and subsequent large-position discontinuities; it must not interpret those transient distances as visibility limits. Entity identities/coordinates remain useful once the position has settled.
+
+The Task Delegator menu remained open for approximately 129 seconds in the replay, outlasting the former 120-second correlation TTL. A longer timeout for explicitly opened menus is covered by an offline regression test; no additional game capture is needed for that boundary case.

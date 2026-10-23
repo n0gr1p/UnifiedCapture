@@ -243,6 +243,9 @@ function P:packet(direction, id, bytes, injected, blocked)
 
     -- Snapshot at packet arrival, not after parsing or during a later render tick.
     local at, observer = self.env.now(), snapshot(self)
+    -- Density/visibility observations require a synchronized observer
+    -- location; never invent one from the previous movement sample.
+    if is_entity and not observer then return end
     if observer then self:check_entity_zone(observer.zone, 'packet_zone_change', at, observer) end
     local ok, p = pcall(self.env.parse, direction, bytes)
     if not ok or type(p) ~= 'table' then

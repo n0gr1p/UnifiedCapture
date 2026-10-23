@@ -122,7 +122,7 @@ function P:start()
     self.entities = entity_tracker.new()
     self.entity_zone, self.menu, self.menu_counter = nil, nil, 0
     self.last_sample, self.last_flush = 0, self.env.now()
-    self:emit('session_start', {schema=2})
+    self:emit('session_start', {schema=2, recorder_version='0.2.1'})
     self:tick(true)
     self.env.log('Recording to data/captures/' .. self.session .. '.jsonl')
 end

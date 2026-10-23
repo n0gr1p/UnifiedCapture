@@ -1,6 +1,6 @@
 _addon.name = 'UnifiedCapture'
 _addon.author = 'n0gr1p'
-_addon.version = '0.1.0'
+_addon.version = '0.2.0'
 _addon.commands = {'ucapture', 'ucap'}
 
 local capture = require('capture')

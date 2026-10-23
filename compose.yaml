@@ -12,7 +12,7 @@ services:
       - "${UCAP_BIND:-127.0.0.1}:8787:8787"
     volumes:
       - ./server-data:/data
-    security_opt:
-      - no-new-privileges:true
+    # Some hosts reject Python exec with Docker no-new-privileges enabled.
+    # Keep UID 10001 and drop all Linux capabilities instead.
     cap_drop:
       - ALL

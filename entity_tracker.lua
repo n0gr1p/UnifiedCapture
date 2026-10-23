@@ -1,140 +1,171 @@
--- Read-only entity observation state; no packet injection or movement control.
--- 0x05B = spawn/appearance, 0x00E = NPC update, 0x065 = repositioning.
-local M = {}
-local Tracker = {}
+-- Passive entity location/visibility tracker for density and navigation telemetry.
+-- No combat log, movement commands, packet injection, or respawn inference.
+local M, Tracker = {}, {}
 Tracker.__index = Tracker
-
-local MIN_MOVE = 0.40
-local UPDATE_HEARTBEAT = 5.0
+local MIN_MOVE, UPDATE_HEARTBEAT, LOOKUP_INTERVAL = 0.40, 5.0, 3.0
+local DEATH_SIGNAL_AGE = 10.0
 
 local function finite(v)
     v = tonumber(v)
     if not v or v ~= v or v == math.huge or v == -math.huge then return nil end
     return v
 end
-
 local function clean_name(s)
     if type(s) ~= 'string' then return nil end
     s = s:gsub('%z.*', ''):gsub('^%s+', ''):gsub('%s+$', '')
-    if s == '' then return nil end
-    return s:sub(1, 96)
+    return s ~= '' and s:sub(1, 96) or nil
 end
-
 local function hasbit(mask, bit)
-    return (mask % (bit * 2)) >= bit
+    return mask and mask % (bit * 2) >= bit
 end
-
-local function kind_for(t)
-    if t == 3 then return 'monster' end
-    if t == 0 then return 'npc_or_casket' end
-    if t == 10 then return 'self' end
-    return 'unknown'
+local function kind_for(packet_type, windower_type)
+    -- Windower mob.spawn_type is not the same enumeration as 0x05B Type.
+    if windower_type == 16 then return 'monster', 'windower_spawn_type' end
+    if windower_type == 14 then return 'non_monster', 'windower_spawn_type' end
+    if packet_type == 3 then return 'monster', 'packet_spawn_type' end
+    if packet_type == 10 then return 'self', 'packet_spawn_type' end
+    -- Packet type 0 is ambiguous (casket or NPC), not an enemy classifier.
+    if packet_type == 0 then return 'npc_or_casket', 'packet_spawn_type' end
+    return 'unknown', 'unresolved'
 end
-
-local function moved(a, x, y, z)
-    if not a or not a.x or not x or not y or not z then return false end
-    local dx, dy, dz = x-a.x, y-a.y, z-a.z
+local function packet_type(v)
+    local n = finite(v)
+    if n then return n end
+    if type(v) == 'string' then
+        local s = v:lower()
+        if s == 'monster' then return 3 end
+        if s == 'casket or npc' then return 0 end
+        if s == 'self' then return 10 end
+    end
+end
+local function percent(v)
+    local n = finite(v)
+    if not n and type(v) == 'string' then
+        n = tonumber(v:match('^%s*(%d+%.?%d*)%%%s*$'))
+    end
+    if n and n >= 0 and n <= 100 then return n end
+end
+local function moved(old, x, y, z)
+    if not old.x or not x or not y or not z then return false end
+    local dx,dy,dz = x-old.x,y-old.y,z-old.z
     return dx*dx + dy*dy + dz*dz >= MIN_MOVE*MIN_MOVE
 end
-
+local function record(kind, id, index, source, e, at, position_is_packet)
+    return {
+        observation_kind=kind, source_packet=source,
+        entity_id=id, entity_index=index, entity_epoch=e.epoch,
+        entity_type=e.type, windower_spawn_type=e.windower_type,
+        entity_kind=e.kind, entity_kind_source=e.kind_source,
+        entity_name=e.name, entity_x=e.x, entity_y=e.y, entity_z=e.z,
+        position_source=position_is_packet and 'packet' or 'last_known',
+        entity_position_age=e.position_at and math.max(0, at-e.position_at) or nil
+    }
+end
 function M.new()
     return setmetatable({entities={}, epoch=0}, Tracker)
 end
-
 function Tracker:reset()
-    local count = 0
-    for _ in pairs(self.entities) do count = count + 1 end
-    self.entities = {}
+    local count=0
+    for _ in pairs(self.entities) do count=count+1 end
+    self.entities={}
     return count
 end
-
-function Tracker:observe(packet_id, parsed, zone, now, lookup)
-    if type(parsed) ~= 'table' or not zone then return nil end
-    local id = finite(parsed[packet_id == 0x00E and 'NPC' or 'ID'])
-    local index = finite(parsed['Index'])
+function Tracker:observe(packet_id, p, zone, at, lookup)
+    if type(p) ~= 'table' or not zone then return nil end
+    local id = finite(p[packet_id == 0x00E and 'NPC' or 'ID'])
+    local index = finite(p['Index'])
     if not id or id <= 0 or not index then return nil end
-    local key = tostring(zone) .. ':' .. tostring(id) .. ':' .. tostring(index)
-    local old = self.entities[key]
-
-    -- 0x065 may be the player's own repositioning: do not create an
-    -- untyped entity from it. It can update an already observed identity.
-    if packet_id == 0x065 and not old then return nil end
-
-    local mask = packet_id == 0x00E and finite(parsed['Mask']) or nil
+    local key = tostring(zone)..':'..tostring(id)..':'..tostring(index)
+    local e = self.entities[key]
+    -- Reposition packets alone do not establish an identity.
+    if packet_id == 0x065 and not e then return nil end
+    local mask = packet_id == 0x00E and finite(p['Mask']) or nil
     if packet_id == 0x00E and not mask then return nil end
-    local disappearing = mask and hasbit(mask, 32)
-    if disappearing then
-        if not old then return nil end
-        self.entities[key] = nil
-        return {
-            observation_kind='last_seen', source_packet=packet_id,
-            entity_id=id, entity_index=index, entity_epoch=old.epoch,
-            entity_type=old.type, entity_kind=old.kind, entity_name=old.name,
-            entity_x=old.x, entity_y=old.y, entity_z=old.z,
-            position_source='last_known',
-            visibility_end_reason='npc_update_visibility_bit',
-            -- This bit can mean out-of-range, despawn, or death.
-        }
-    end
 
-    -- 0x00E only has meaningful coordinates when bit 0 of Mask is set.
-    local has_position = packet_id ~= 0x00E or hasbit(mask, 1)
-    local x = has_position and finite(parsed['X']) or nil
-    local y = has_position and finite(parsed['Y']) or nil
-    local z = has_position and finite(parsed['Z']) or nil
-    if not (x and y and z) then x, y, z = nil, nil, nil end
-    if not old and not x then return nil end
-
-    local typ = packet_id == 0x05B and finite(parsed['Type']) or (old and old.type)
-    local name = old and old.name or nil
-    if packet_id == 0x00E and hasbit(mask, 8) then
-        name = clean_name(parsed['Name']) or name
-    end
-    local lookup_due = not old or now - (old.last_lookup or -1e9) >= 3.0
-    if not name and type(lookup) == 'function' and lookup_due then
-        local ok, mob = pcall(lookup, id)
-        if old then old.last_lookup = now end
-        if ok and type(mob) == 'table' and
-           (mob.id == nil or tonumber(mob.id) == id) and
-           (mob.index == nil or tonumber(mob.index) == index) then
-            name = clean_name(mob.name)
+    local hp_changed = packet_id == 0x00E and hasbit(mask, 4)
+    if e and hp_changed then
+        -- Keep only the most recent death-related context in memory.
+        local hp = percent(p['HP %'])
+        if hp ~= nil then e.last_hp, e.last_hp_at = hp, at end
+        if type(p['Status']) == 'string' or type(p['Status']) == 'number' then
+            e.last_status = tostring(p['Status'])
+            e.last_status_at = at
         end
     end
 
-    if not old then
-        self.epoch = self.epoch + 1
-        old = {epoch=self.epoch, type=typ, kind=kind_for(typ), name=name,
-            x=x, y=y, z=z, last_emitted=now,
-            last_lookup=not name and lookup_due and now or nil}
-        self.entities[key] = old
-        return {
-            observation_kind='first_seen', source_packet=packet_id,
-            entity_id=id, entity_index=index, entity_epoch=old.epoch,
-            entity_type=typ, entity_kind=old.kind, entity_name=name,
-            entity_x=x, entity_y=y, entity_z=z, position_source='packet'
-        }
+    if packet_id == 0x00E and hasbit(mask, 32) then
+        if not e then return nil end
+        self.entities[key] = nil
+        local result = record('last_seen',id,index,packet_id,e,at,false)
+        result.visibility_end_reason='npc_update_visibility_bit'
+        if e.last_hp ~= nil then result.last_hp_percent=e.last_hp end
+        if e.last_status ~= nil then result.last_entity_status=e.last_status end
+        if e.last_hp_at then result.last_hp_age=math.max(0,at-e.last_hp_at) end
+        if e.last_hp == 0 and e.last_hp_at and at-e.last_hp_at <= DEATH_SIGNAL_AGE then
+            result.death_signal='recent_zero_hp'
+        elseif e.last_status and e.last_status:lower():find('dead',1,true) and
+            e.last_status_at and at-e.last_status_at <= DEATH_SIGNAL_AGE then
+            result.death_signal='recent_dead_status'
+        end
+        -- Absence of a death signal does not imply range exit.
+        result.disappearance_cause='unknown'
+        return result
     end
 
-    local changed_name = name ~= nil and name ~= old.name
-    local changed_position = moved(old, x, y, z)
-    if x then old.x, old.y, old.z = x, y, z end
-    if name then old.name = name end
-    if typ then old.type, old.kind = typ, kind_for(typ) end
+    local position_present = packet_id ~= 0x00E or hasbit(mask, 1)
+    local x=position_present and finite(p['X']) or nil
+    local y=position_present and finite(p['Y']) or nil
+    local z=position_present and finite(p['Z']) or nil
+    if x == nil or y == nil or z == nil then x,y,z=nil,nil,nil end
+    if not e and x == nil then return nil end
 
-    local kind
-    if packet_id == 0x05B then kind = 'reseen'
-    elseif changed_position then kind = 'position_update'
-    elseif changed_name then kind = 'identity_update'
-    elseif now - old.last_emitted >= UPDATE_HEARTBEAT then kind = 'still_visible'
+    local typ = packet_id == 0x05B and packet_type(p['Type']) or (e and e.type)
+    local name = e and e.name or nil
+    if packet_id == 0x00E and hasbit(mask, 8) then
+        name = clean_name(p['Name']) or name
+    end
+
+    local wt = e and e.windower_type or nil
+    local kind = kind_for(typ,wt)
+    local unresolved = not name or kind == 'unknown' or
+        (kind == 'npc_or_casket' and wt == nil)
+    if type(lookup) == 'function' and unresolved and
+       (not e or not e.last_lookup or at - e.last_lookup >= LOOKUP_INTERVAL) then
+        local ok, mob = pcall(lookup,id)
+        if e then e.last_lookup=at end
+        if ok and type(mob)=='table' and
+           (mob.id == nil or tonumber(mob.id)==id) and
+           (mob.index == nil or tonumber(mob.index)==index) then
+            name = clean_name(mob.name) or name
+            wt = finite(mob.spawn_type) or wt
+        end
+    end
+    local resolved, resolved_source = kind_for(typ,wt)
+    if not e then
+        self.epoch=self.epoch+1
+        e={epoch=self.epoch,type=typ,windower_type=wt,kind=resolved,
+            kind_source=resolved_source,name=name,x=x,y=y,z=z,position_at=at,
+            last_emitted=at,last_lookup=at}
+        self.entities[key]=e
+        return record('first_seen',id,index,packet_id,e,at,true)
+    end
+
+    local changed_position=moved(e,x,y,z)
+    local changed_identity=(e.name~=name or e.kind~=resolved or
+        e.type~=typ or e.windower_type~=wt)
+    if x then
+        e.x,e.y,e.z=x,y,z
+        e.position_at=at
+    end
+    e.type,e.windower_type,e.kind,e.kind_source,e.name =
+        typ,wt,resolved,resolved_source,name
+
+    local kind_of_event
+    if changed_position then kind_of_event='position_update'
+    elseif changed_identity then kind_of_event='identity_update'
+    elseif at-e.last_emitted >= UPDATE_HEARTBEAT then kind_of_event='still_visible'
     else return nil end
-    old.last_emitted = now
-    return {
-        observation_kind=kind, source_packet=packet_id,
-        entity_id=id, entity_index=index, entity_epoch=old.epoch,
-        entity_type=old.type, entity_kind=old.kind, entity_name=old.name,
-        entity_x=old.x, entity_y=old.y, entity_z=old.z,
-        position_source=x and 'packet' or 'last_known'
-    }
+    e.last_emitted=at
+    return record(kind_of_event,id,index,packet_id,e,at,x~=nil)
 end
-
 return M

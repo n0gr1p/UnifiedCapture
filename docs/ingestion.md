@@ -23,8 +23,9 @@ Windower client(s) -> JSONL files -> one Windows Python uploader
 - The raw archive contains **exact original JSONL bytes** for each HTTP batch
   in immutable SHA-256-named files. SQLite stores original event objects and
   query-ready position, entity, interaction, and session projections.
-- Replay the batch archive at server startup to repair the gap between
-  archival fsync and SQLite commit. Raw evidence is never modified to fit
+- Replay only archive batches not present in the SQLite committed-batch
+  ledger at server startup to repair the gap between archival fsync and SQLite
+  commit. Existing committed batches are skipped rather than fully reread. Raw evidence is never modified to fit
   an interpretation. Backup the entire `server-data` directory, not just
   `capture.sqlite3`. A live backup must use SQLite's backup API or a
   consistent filesystem snapshot.
@@ -41,7 +42,15 @@ python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
 Copy the generated random token into `UCAP_API_TOKEN` in `.env`. Keep that
-file private. Set `UCAP_BIND` to the Linux server's **LAN IPv4 address** to
+file private. Before the first start, prepare a persistent host directory
+writable by the container's fixed unprivileged UID/GID (10001):
+
+```sh
+sudo install -d -m 0700 -o 10001 -g 10001 ./server-data
+```
+
+If that directory already exists with data, inspect its ownership before
+changing anything. Set `UCAP_BIND` to the Linux server's **LAN IPv4 address** to
 allow the gaming PC to connect. The default `127.0.0.1` is intentionally
 localhost-only for safe first boot.
 
@@ -58,6 +67,7 @@ HTTP does not encrypt that token. **Do not expose port 8787 to the public
 Internet.** For untrusted networks use a TLS reverse proxy or private VPN.
 
 `server-data/` is a host directory bind mount, not an ephemeral volume.
+Its ownership is deliberately separate from your interactive account.
 Inside, `capture.sqlite3` (and SQLite WAL files) and
 `archive/batches/<sha256>.jsonl` hold the durable dataset.
 

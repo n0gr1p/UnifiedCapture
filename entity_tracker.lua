@@ -90,8 +90,10 @@ function Tracker:observe(packet_id, parsed, zone, now, lookup)
     if packet_id == 0x00E and hasbit(mask, 8) then
         name = clean_name(parsed['Name']) or name
     end
-    if not name and type(lookup) == 'function' then
+    local lookup_due = not old or now - (old.last_lookup or -1e9) >= 3.0
+    if not name and type(lookup) == 'function' and lookup_due then
         local ok, mob = pcall(lookup, id)
+        if old then old.last_lookup = now end
         if ok and type(mob) == 'table' and
            (mob.id == nil or tonumber(mob.id) == id) and
            (mob.index == nil or tonumber(mob.index) == index) then
@@ -102,7 +104,8 @@ function Tracker:observe(packet_id, parsed, zone, now, lookup)
     if not old then
         self.epoch = self.epoch + 1
         old = {epoch=self.epoch, type=typ, kind=kind_for(typ), name=name,
-            x=x, y=y, z=z, last_emitted=now}
+            x=x, y=y, z=z, last_emitted=now,
+            last_lookup=not name and lookup_due and now or nil}
         self.entities[key] = old
         return {
             observation_kind='first_seen', source_packet=packet_id,

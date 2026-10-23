@@ -9,5 +9,6 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y lua5.1
       - name: Parse and test
         run: |
-          luac5.1 -p UnifiedCapture.lua capture.lua tests/selftest.lua
+          luac5.1 -p UnifiedCapture.lua capture.lua entity_tracker.lua tests/selftest.lua tests/selftest_entity.lua
           lua5.1 tests/selftest.lua
+          lua5.1 tests/selftest_entity.lua

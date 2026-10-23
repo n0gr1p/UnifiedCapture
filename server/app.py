@@ -14,7 +14,7 @@ LOG = logging.getLogger("unifiedcapture")
 
 
 def serve(host, port, db_path, archive_dir, token):
-    if not token or len(token) < 16:
+    if not token or len(token) < 16 or token.startswith("REPLACE_"):
         raise ValueError("UCAP_API_TOKEN must be set to at least 16 characters")
     initialize(db_path)
     replayed = recover(db_path, archive_dir)

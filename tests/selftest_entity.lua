@@ -9,7 +9,8 @@ local a = obs(0x05B, {ID=1001, Index=22, Type=3, X=10, Y=20, Z=1})
 assert(a.observation_kind == 'first_seen' and a.entity_kind == 'monster')
 assert(a.entity_x == 10 and a.entity_y == 20 and a.entity_z == 1)
 local initial_epoch = a.entity_epoch
-assert(obs(0x05B, {ID=1001, Index=22, Type=3, X=10, Y=20, Z=1}, 1001).observation_kind == 'reseen')
+assert(obs(0x05B, {ID=1001, Index=22, Type=3, X=10, Y=20, Z=1}, 1001) == nil,
+    'identical appearance packets are not new distinct mob observations')
 assert(obs(0x00E, {NPC=1001, Index=22, Mask=0, X=0, Y=0, Z=0}, 1002) == nil,
     'masked zero position must not erase valid coordinates')
 local m = obs(0x00E, {NPC=1001, Index=22, Mask=1, X=11, Y=20, Z=1}, 1003)
@@ -32,6 +33,56 @@ assert(back.observation_kind == 'first_seen' and back.entity_epoch > initial_epo
     'new visibility window for returned identity')
 assert(t:reset() == 1, 'zone/session reset clears identity cache')
 assert(obs(0x05B, {ID=1001, Index=22, Type=0, X=15, Y=20, Z=1}).entity_kind == 'npc_or_casket')
+
+-- Monster classification does not require a 0x05B packet: Windower's
+-- mob.spawn_type=16 can enrich an incoming 0x00E first-seen observation.
+local classified=t:observe(0x00E,{NPC=2001,Index=77,Mask=9,Name='Blood Toad',
+    X=4,Y=5,Z=6},262,1100,function(id)
+    assert(id==2001)
+    return {id=id,index=77,name='Blood Toad',spawn_type=16}
+end)
+assert(classified.entity_kind=='monster')
+assert(classified.entity_kind_source=='windower_spawn_type')
+assert(classified.windower_spawn_type==16 and classified.entity_name=='Blood Toad')
+local late=t:observe(0x05B,{ID=2002,Index=78,Type=0,X=4,Y=5,Z=6},262,1101,
+    function() return {id=2002,index=78,spawn_type=16,name='Broadleaf Palm'} end)
+assert(late.entity_kind=='monster' and late.entity_type==0,
+    'packet type and Windower spawn_type use different enumerations')
+assert(t:observe(0x05B,{ID=2002,Index=78,Type=0,X=4,Y=5,Z=6},262,1102,
+    function() return nil end) == nil)
+local visible=t:observe(0x05B,{ID=2002,Index=78,Type=0,X=4,Y=5,Z=6},262,1107,
+    function() return nil end)
+assert(visible.observation_kind=='still_visible',
+    'periodic observations still support empirical visibility measurements')
+
+-- Death context is retained in memory for the disappearance event only.
+-- HP/status fluctuations must not create combat telemetry.
+local d=t:observe(0x00E,{NPC=3001,Index=79,Mask=9,Name='Cinder Crab',
+    X=7,Y=8,Z=9},262,1200,function() return {id=3001,index=79,spawn_type=16} end)
+assert(d.entity_kind=='monster')
+assert(t:observe(0x00E,{NPC=3001,Index=79,Mask=4,['HP %']=91,Status='Engaged'},
+    262,1201,function() return nil end)==nil)
+assert(t:observe(0x00E,{NPC=3001,Index=79,Mask=4,['HP %']=0,Status='Dead'},
+    262,1202,function() return nil end)==nil)
+local dead=t:observe(0x00E,{NPC=3001,Index=79,Mask=32},
+    262,1202.2,function() return nil end)
+assert(dead.observation_kind=='last_seen' and dead.last_hp_percent==0)
+assert(dead.death_signal=='recent_zero_hp' and dead.disappearance_cause=='unknown')
+assert(dead.last_entity_status=='Dead')
+local live=t:observe(0x00E,{NPC=3002,Index=80,Mask=9,Name='Zoldeff Jagil',
+    X=17,Y=18,Z=9},262,1300,function() return nil end)
+assert(live)
+t:observe(0x00E,{NPC=3002,Index=80,Mask=4,['HP %']=100,Status='Idle'},
+    262,1300.2)
+local lost=t:observe(0x00E,{NPC=3002,Index=80,Mask=32},262,1301)
+assert(lost.observation_kind=='last_seen' and lost.death_signal==nil,
+    'no death evidence must not be misread as range exit')
+assert(lost.last_hp_percent==100)
+-- A stale zero HP signal also cannot imply the latest exit was a death.
+t:observe(0x00E,{NPC=3003,Index=81,Mask=1,X=18,Y=19,Z=8},262,1400)
+t:observe(0x00E,{NPC=3003,Index=81,Mask=4,['HP %']=0},262,1401)
+local stale=t:observe(0x00E,{NPC=3003,Index=81,Mask=32},262,1420)
+assert(stale and stale.death_signal==nil and stale.last_hp_age>=19)
 
 -- Recorder-level tests for schema, observer-at-packet synchronization,
 -- classification, multi-packet menu correlation, and zone/session reset.
@@ -70,6 +121,7 @@ decoded.choice={Target=999,['Target Index']=33,['Menu ID']=88,['Option Index']=7
 decoded.warp={['Target ID']=999,['Target Index']=33,['Menu ID']=88,Zone=256}
 decoded.release={Type=2,['Menu ID']=88}
 decoded.zone={}
+decoded.request={Target=999,['Target Index']=33,Category=0,Param=0}
 c:start()
 assert(c.active)
 c:packet('incoming',0x05B,'spawn',false,false)
@@ -82,6 +134,23 @@ c:packet('incoming',0x05C,'params',false,false)
 c:packet('outgoing',0x05B,'choice',false,false)
 c:packet('outgoing',0x05C,'warp',false,false)
 c:packet('incoming',0x052,'release',false,false)
+
+-- Recreate a Home Point/Waypoint style sequence with no inbound menu open.
+-- Incoming 0x052 release does not necessarily end that interaction; the
+-- second choice may arrive milliseconds later.
+clock=clock+10
+c:packet('outgoing',0x01A,'request',false,false)
+local seeded=c.menu.id
+c:packet('outgoing',0x05B,'choice',false,false)
+assert(c.menu.id==seeded and not c.menu.has_open)
+c:packet('incoming',0x052,'release',false,false)
+clock=clock+0.015
+c:packet('incoming',0x05C,'params',false,false)
+c:packet('outgoing',0x05B,'choice',false,false)
+assert(c.menu.id==seeded,'post-release menu continuation must retain request ID')
+clock=clock+3
+c:packet('outgoing',0x05B,'choice',false,false)
+assert(c.menu.id~=seeded,'late choice must open separate interaction')
 local before = c.seq
 c:packet('incoming',0x05B,'spawn',false,true)
 assert(c.seq == before, 'blocked packets not recorded')
@@ -102,6 +171,9 @@ assert(jsonl:find('"interaction_stage":"warp_request"',1,true))
 assert(jsonl:find('"interaction_stage":"menu_release"',1,true))
 assert(jsonl:find('"interaction_stage":"menu_parameters"',1,true))
 assert(jsonl:find('"interaction_correlation":"matched_menu"',1,true))
+assert(jsonl:find('"interaction_stage":"interaction_request"',1,true))
+assert(jsonl:find('"interaction_correlation":"matched_request"',1,true))
+assert(jsonl:find('"interaction_origin":"interaction_request"',1,true))
 assert(not jsonl:find('menu_response',1,true), 'spawn never called menu response')
 assert(not jsonl:find('spawn',1,true), 'raw packet contents never persisted')
 assert(not c.active)

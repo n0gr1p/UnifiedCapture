@@ -16,20 +16,20 @@ Append-only JSONL records; each line has timestamp, session, sequence, optional 
 
 ### Entity observation events
 
-`entity_observation` has `observation_kind`: `first_seen`, `reseen`, `position_update`, `identity_update`, `still_visible`, or `last_seen`. It includes:
+`entity_observation` has `observation_kind`: `first_seen`, `position_update`, `identity_update`, `still_visible`, or `last_seen`. It includes:
 - `entity_id`, `entity_index`, `entity_epoch` (local visibility-window counter)
-- `entity_type` (raw spawn type when available), `entity_kind` (`monster` for type 3, `npc_or_casket` for type 0, `self` for type 10, otherwise `unknown`)
+- `entity_type` (raw spawn packet type when available), `windower_spawn_type` (mob-cache type when available), `entity_kind` and `entity_kind_source` (notably Windower spawn type 16 = monster; packet type 3 = monster, packet type 0 = ambiguous NPC/casket)
 - `entity_x/y/z` and `position_source` (`packet` or `last_known`)
 - `entity_name` if learned from a named update or later live lookup; the 0x05B spawn packet itself **does not contain a name**
 - `observer_x/y/z`, `zone`, `character`, timestamp, packet ID and injection status
 
-Incoming `0x05B` is a **spawn/appearance**, never a menu response; `0x00E` is an NPC update with a field mask; `0x065` can refine the position of an already tracked entity. Updates lacking the position bit cannot replace stored coordinates with zeroes. Duplicate position updates are suppressed when stationary, but sightings, identity changes, movements and periodic five-second confirmation are retained.
+Incoming `0x05B` is a **spawn/appearance**, never a menu response; `0x00E` is an NPC update with a field mask; `0x065` can refine the position of an already tracked entity. Updates lacking the position bit cannot replace stored coordinates with zeroes. Repeated identical appearance/update packets are suppressed while identity changes, movement and periodic five-second confirmation are retained; never count repeated packets as additional mobs. Classifications are retried when the entity cache becomes available.
 
-A `last_seen` on the incoming `0x00E` visibility bit **cannot by itself establish why the entity vanished**: death, despawn and out-of-range are all possible. When zoning, the tracker emits `entity_visibility_reset` with a count and clears identity state rather than creating false per-mob disappearance events. IDs are scoped to zone and recording session; the per-appearance epoch distinguishes a repeated visibility window.
+An incoming `0x00E` mask bit 2 provides HP/status context, held in memory only. A `last_seen` event may contain `last_hp_percent`, `last_hp_age`, `last_entity_status`, and `death_signal` (recent zero HP or an explicit dead status). These are supporting clues, not proof of the cause; the `disappearance_cause` remains `unknown`. No per-HP-change combat events are emitted. A `last_seen` on the incoming `0x00E` visibility bit **cannot by itself establish why the entity vanished**: death, despawn and out-of-range are all possible. When zoning, the tracker emits `entity_visibility_reset` with a count and clears identity state rather than creating false per-mob disappearance events. IDs are scoped to zone and recording session; the per-appearance epoch distinguishes a repeated visibility window.
 
 ### NPC menu lifecycle
 
-The recorder also captures the metadata of incoming `0x032`/`0x033`/`0x034` menu opens, incoming `0x05C` supplementary menu parameters (without raw menu data), outgoing `0x05B` choices, outgoing `0x05C` warp requests, and incoming `0x052` releases. Correlated events have `interaction_id` (within a capture session), `interaction_stage`, and matching NPC/menu identifiers when available. This is **packet correlation**, not proof of successful interaction. Menu contexts expire after two minutes and reset when zoning; orphan choices remain recorded.
+The recorder also captures the metadata of incoming `0x032`/`0x033`/`0x034` menu opens, incoming `0x05C` supplementary menu parameters (without raw menu data), outgoing `0x05B` choices, outgoing `0x05C` warp requests, and incoming `0x052` releases. Outgoing `0x01A` category 0 interactions seed an interaction even when no menu-open packet arrives. A release is retained for a brief two-second continuation window because observed Home Point flows can resume with a further menu choice. Correlated events have `interaction_id` (within a capture session), `interaction_stage`, `interaction_origin`, and matching NPC/menu identifiers when available. This is **packet correlation**, not proof of successful interaction. Menu contexts expire after two minutes and reset when zoning; orphan choices remain recorded.
 
 ### Known limits and safety
 
@@ -52,3 +52,7 @@ luac5.1 -p UnifiedCapture.lua capture.lua entity_tracker.lua tests/selftest.lua 
 lua5.1 tests/selftest.lua
 lua5.1 tests/selftest_entity.lua
 ```
+
+## v0.2.1 live acceptance details
+
+After the repeat run, inspect monster classification rates on 0x00E-first sightings, the number of distinct IDs versus periodic `still_visible` records, last-seen death-signal evidence near the Broadleaf Palm, and whether Home Point/Waypoint interaction requests, choices and releases share interaction IDs. Short-range disappearances without death context remain ambiguous and must not be used as automatic visibility-radius ground truth.

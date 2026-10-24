@@ -173,6 +173,16 @@ local c = capture.new({
     target=function(id)
         if id == 999 then return {id=999,index=33,name='Waypoint',x=4,y=2,z=0} end
     end,
+    item=function(bag, slot)
+        if bag ~= 0 then return nil end
+        if slot == 4 then return {id=41001} end -- Ring fixture
+        if slot == 7 then return {id=41002} end -- Scroll fixture
+        if slot == 8 then error('inventory unavailable') end
+    end,
+    item_name=function(id)
+        if id == 41001 then return 'Warp Ring' end
+        if id == 41002 then return 'Instant Warp' end
+    end,
     path='./', dir_exists=function() return true end,
     create_dir=function() end,
     parse=function(direction, raw)
@@ -195,6 +205,9 @@ decoded.warp={['Target ID']=999,['Target Index']=33,['Menu ID']=88,Zone=256}
 decoded.release={Type=2,['Menu ID']=88}
 decoded.zone={}
 decoded.request={Target=999,['Target Index']=33,Category=0,Param=0}
+decoded.ring={Player=9,Bag=0,Slot=4}
+decoded.scroll={Player=9,Bag=0,Slot=7}
+decoded.missing_item={Player=9,Bag=0,Slot=8}
 c:start()
 assert(c.active)
 c:packet('incoming',0x05B,'spawn',false,false)
@@ -207,6 +220,16 @@ c:packet('incoming',0x05C,'params',false,false)
 c:packet('outgoing',0x05B,'choice',false,false)
 c:packet('outgoing',0x05C,'warp',false,false)
 c:packet('incoming',0x052,'release',false,false)
+
+-- Warp Ring and Instant Warp use outgoing 0x037; resolve by bag and slot
+-- without recording full inventory or claiming that the warp succeeded.
+local before_item = c.seq
+c:packet('outgoing',0x037,'ring',false,true)
+assert(c.seq == before_item, 'blocked item use must not be recorded')
+c:packet('outgoing',0x037,'ring',false,false)
+c:packet('outgoing',0x037,'scroll',true,false)
+c:packet('outgoing',0x037,'missing_item',false,false)
+assert(c.seq >= before_item+3, 'item requests remain captured if lookup fails')
 
 -- Recreate a Home Point/Waypoint style sequence with no inbound menu open.
 -- Incoming 0x052 release does not necessarily end that interaction; the
@@ -252,12 +275,18 @@ c:stop('test')
 io.open = oldopen
 local jsonl=table.concat(rows)
 assert(jsonl:find('"schema":2',1,true))
-assert(jsonl:find('"recorder_version":"0.2.3"',1,true))
+assert(jsonl:find('"recorder_version":"0.2.4"',1,true))
 assert(jsonl:find('"packet_id":91',1,true) and jsonl:find('"entity_kind":"monster"',1,true))
 assert(jsonl:find('"observer_x":5',1,true), 'original observer position preserved')
 assert(jsonl:find('"observation_kind":"last_seen"',1,true))
 assert(jsonl:find('"reason":"zone_event"',1,true), 'zone reset recorded')
 assert(jsonl:find('"packet_kind":"npc_menu_string"',1,true))
+assert(jsonl:find('"packet_kind":"item_use_request"',1,true))
+assert(jsonl:find('"item_name":"Warp Ring"',1,true) and jsonl:find('"item_id":41001',1,true))
+assert(jsonl:find('"item_name":"Instant Warp"',1,true) and jsonl:find('"item_id":41002',1,true))
+assert(jsonl:find('"item_slot":4',1,true) and jsonl:find('"item_bag":0',1,true))
+assert(jsonl:find('"item_slot":8',1,true), 'inventory failures keep slot evidence')
+assert(not jsonl:find('"item_name":"inventory unavailable"',1,true))
 assert(jsonl:find('"interaction_stage":"menu_open"',1,true))
 assert(jsonl:find('"interaction_stage":"menu_choice"',1,true))
 assert(jsonl:find('"interaction_stage":"warp_request"',1,true))

@@ -148,6 +148,32 @@ class UploaderTests(StoreTests):
 
 
 
+    def test_legacy_checkpoint_reindexes_chunks_without_new_events(self):
+        session = "niightsiide_20261023T232858Z_315599_5"
+        filename = session + ".jsonl"
+        raw = ndjson(event(session, 1, "session_start", schema=2),
+                     event(session, 2, "session_stop", reason="manual"))
+        path = Path(self.tmp.name) / filename
+        path.write_bytes(raw)
+        statefile = Path(self.tmp.name) / "state.json"
+        key = os.path.normcase(str(path.resolve()))
+        state = {"version": 1, "files": {key: {"offset": len(raw)}}}
+        storage.ingest(self.db, self.archive, raw, filename)  # legacy receipt
+        original = uploader.upload
+        try:
+            uploader.upload = lambda url, token, source, chunk, count, timeout, offset: (
+                storage.ingest(self.db, self.archive, chunk, source, offset))
+            self.assertEqual(uploader.upload_file(
+                path, state, statefile, "http://unused", "token"), 2)
+        finally:
+            uploader.upload = original
+        self.assertEqual(state["files"][key],
+                         {"offset": len(raw), "receipted": True})
+        self.assertEqual(storage.stats(self.db)["events"], 2)
+        self.assertTrue(storage.verify_file(self.db, self.archive, dict(
+            source_file=filename, session=session, size=len(raw),
+            sha256=hashlib.sha256(raw).hexdigest()))["verified"])
+
     def test_file_receipts_require_full_archive_coverage_and_terminal_stop(self):
         session = "niightsiide_20261023T232858Z_315599_2"
         filename = session + ".jsonl"

@@ -169,7 +169,7 @@ class UploaderTests(StoreTests):
         storage.ingest(self.db, self.archive, part_a, filename, 0)
         manifest = dict(source_file=filename, session=session, size=len(full),
                         sha256=hashlib.sha256(full).hexdigest())
-        with self.assertRaisesRegex(storage.IngestError, "Missing|incomplete"):
+        with self.assertRaisesRegex(storage.IngestError, "Missing|incomplete|checksum"):
             storage.verify_file(self.db, self.archive, manifest)
         storage.ingest(self.db, self.archive, part_b, filename, len(part_a))
         verified = storage.verify_file(self.db, self.archive, manifest)

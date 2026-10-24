@@ -1,3 +1,11 @@
 data/
 *.log
 *.jsonl
+.env
+server-data/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+ucap-uploader-state.json
+__pycache__/
+*.pyc

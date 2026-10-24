@@ -68,3 +68,54 @@ The 2026-10-23 Niightsiide replay captured 2,159 valid, continuously sequenced J
 **In-zone Waypoint warps produce transient incompatible coordinates:** in the replay the new-area entities arrived while the observer's pre-warp position was still reported (~350-390 coordinate units from those entities); moments later, old-area entities disappeared while the observer was at the destination. These raw events are preserved intentionally. Visibility-radius analysis must exclude observations near in-zone warp requests and subsequent large-position discontinuities; it must not interpret those transient distances as visibility limits. Entity identities/coordinates remain useful once the position has settled.
 
 The Task Delegator menu remained open for approximately 129 seconds in the replay, outlasting the former 120-second correlation TTL. A longer timeout for explicitly opened menus is covered by an offline regression test; no additional game capture is needed for that boundary case.
+
+## Server-side permanent collection (in progress)
+
+The optional `feature/server-ingestion` branch adds a **separate** Python 3
+standard-library server and uploader. The Windower Lua recorder remains local,
+passive, and unchanged. The Docker service archives original JSONL upload batches,
+imports validated events into SQLite, and deduplicates by `session + sequence`;
+a Windows-side uploader follows every configured capture directory using a durable
+byte-offset checkpoint and network retries.
+
+See [deployment and backfill instructions](docs/ingestion.md), including
+private-LAN binding, an explicit secret token, backup requirements and a
+server-side integration test suite. No server deployment occurs automatically
+when upgrading the Windower addon.
+
+## Item-use requests and travel attribution (v0.2.4)
+
+Outgoing `0x037` item-use packets are retained as `packet_observation` events
+with `packet_kind=item_use_request`, `item_bag` and `item_slot`. When Windower's
+inventory snapshot resolves that slot, the recorder also emits `item_id` and
+its English `item_name` (e.g., Warp Ring or Instant Warp). If the snapshot or
+resource name is unavailable, it still records the original request without
+inventing a name. This is passive observation; no inventory dumps or raw packet
+payloads are stored. Spell action requests remain available through `0x01A`.
+
+A request does **not** prove item activation or successful teleportation.
+Offline analysis should correlate requests with subsequent zone changes and
+preserve unknown or ambiguous causes. In-zone teleports continue to produce
+explicit position discontinuities rather than walking edges.
+
+## 24/7 capture rotation and verified local retention (v0.2.3)
+
+UnifiedCapture v0.2.3 automatically rotates its **file recording sessions**
+after **24 hours or 64 MiB**, whichever comes first, even while the FFXI
+character remains logged in. Each closed segment ends with `session_stop`
+(reason `rotation_duration` or `rotation_size`), and the new file begins
+with `session_start` and a fresh position anchor. A failure to open a new
+file leaves the existing recording active. Zone changes do not rotate files.
+
+The standalone Windows uploader can optionally delete completed capture files
+after **seven days**, but only when the Linux server certifies an exact
+SHA-256 match reconstructed from every archived upload chunk, uninterrupted
+byte offsets, complete SQLite event sequences, and a final `session_stop`.
+This verification is **not** inferred from an upload offset or batch HTTP 200
+response alone. There is no deletion of current sessions, unverified files,
+or incomplete/crashed recordings. The default uploader behavior remains
+**no deletion** until `--retention-days 7` is deliberately enabled.
+
+Older uploader checkpoints are replayed once after the upgrade to construct
+verifiable chunk receipts; the server deduplicates their already-imported
+events. See [deployment and safety details](docs/ingestion.md).

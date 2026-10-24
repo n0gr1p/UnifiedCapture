@@ -1,0 +1,18 @@
+services:
+  ingest:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      # Defaults to localhost only. Set UCAP_BIND to the Linux LAN address
+      # for Windows uploaders; never expose plaintext HTTP to the Internet.
+      - "${UCAP_BIND:-127.0.0.1}:8787:8787"
+    volumes:
+      - ./server-data:/data
+    # Some hosts reject Python exec with Docker no-new-privileges enabled.
+    # Keep UID 10001 and drop all Linux capabilities instead.
+    cap_drop:
+      - ALL

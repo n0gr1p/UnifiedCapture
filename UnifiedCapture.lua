@@ -1,17 +1,23 @@
 _addon.name = 'UnifiedCapture'
 _addon.author = 'n0gr1p'
-_addon.version = '0.2.2'
+_addon.version = '0.2.4'
 _addon.commands = {'ucapture', 'ucap'}
 
 local capture = require('capture')
 local socket = require('socket')
 local packets = require('packets')
+local resources = require('resources')
 local recorder = capture.new({
     now = socket.gettime,
     player = function() return windower.ffxi.get_player() end,
     info = function() return windower.ffxi.get_info() end,
     self_mob = function() return windower.ffxi.get_mob_by_target('me') end,
     target = function(id) return windower.ffxi.get_mob_by_id(id) end,
+    item = function(bag, slot) return windower.ffxi.get_items(bag, slot) end,
+    item_name = function(id)
+        local entry = resources.items[id]
+        return entry and entry.en
+    end,
     path = windower.addon_path,
     dir_exists = windower.dir_exists,
     create_dir = windower.create_dir,

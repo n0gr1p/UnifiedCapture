@@ -82,3 +82,25 @@ See [deployment and backfill instructions](docs/ingestion.md), including
 private-LAN binding, an explicit secret token, backup requirements and a
 server-side integration test suite. No server deployment occurs automatically
 when upgrading the Windower addon.
+
+## 24/7 capture rotation and verified local retention (v0.2.3)
+
+UnifiedCapture v0.2.3 automatically rotates its **file recording sessions**
+after **24 hours or 64 MiB**, whichever comes first, even while the FFXI
+character remains logged in. Each closed segment ends with `session_stop`
+(reason `rotation_duration` or `rotation_size`), and the new file begins
+with `session_start` and a fresh position anchor. A failure to open a new
+file leaves the existing recording active. Zone changes do not rotate files.
+
+The standalone Windows uploader can optionally delete completed capture files
+after **seven days**, but only when the Linux server certifies an exact
+SHA-256 match reconstructed from every archived upload chunk, uninterrupted
+byte offsets, complete SQLite event sequences, and a final `session_stop`.
+This verification is **not** inferred from an upload offset or batch HTTP 200
+response alone. There is no deletion of current sessions, unverified files,
+or incomplete/crashed recordings. The default uploader behavior remains
+**no deletion** until `--retention-days 7` is deliberately enabled.
+
+Older uploader checkpoints are replayed once after the upgrade to construct
+verifiable chunk receipts; the server deduplicates their already-imported
+events. See [deployment and safety details](docs/ingestion.md).

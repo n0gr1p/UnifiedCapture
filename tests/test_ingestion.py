@@ -135,8 +135,8 @@ class UploaderTests(StoreTests):
             with self.assertRaises(OSError):
                 uploader.upload_file(file, state, state_path, "http://localhost:1", "test-token")
             self.assertFalse(state_path.exists())
-            uploader.upload = lambda url, token, source, raw, records, timeout: storage.ingest(
-                self.db, self.archive, raw, source)
+            uploader.upload = lambda url, token, source, raw, records, timeout, offset: storage.ingest(
+                self.db, self.archive, raw, source, offset)
             count = uploader.upload_file(file, state, state_path, "http://unused", "test-token")
             self.assertEqual(count, 4)
             self.assertEqual(uploader.load_state(state_path)["files"][str(file.resolve())]["offset"],
@@ -145,6 +145,95 @@ class UploaderTests(StoreTests):
                                                    "http://unused", "test-token"), 0)
         finally:
             uploader.upload = original
+
+
+
+    def test_file_receipts_require_full_archive_coverage_and_terminal_stop(self):
+        session = "niightsiide_20261023T232858Z_315599_2"
+        filename = session + ".jsonl"
+        records = [
+            event(session, 1, "session_start", schema=2, recorder_version="0.2.3"),
+            event(session, 2, "position", x=1, y=2, z=3),
+            event(session, 3, "session_stop", reason="rotation_duration"),
+        ]
+        part_a, part_b = ndjson(*records[:2]), ndjson(records[2])
+        full = part_a + part_b
+        file_dir = Path(self.tmp.name) / "captures"
+        file_dir.mkdir()
+        path = file_dir / filename
+        path.write_bytes(full)
+        checkpoint = Path(self.tmp.name) / "checkpoint.json"
+        state = {"version": 1, "files": {
+            os.path.normcase(str(path.resolve())): {"offset": len(full)}
+        }}
+        storage.ingest(self.db, self.archive, part_a, filename, 0)
+        manifest = dict(source_file=filename, session=session, size=len(full),
+                        sha256=hashlib.sha256(full).hexdigest())
+        with self.assertRaisesRegex(storage.IngestError, "Missing|incomplete"):
+            storage.verify_file(self.db, self.archive, manifest)
+        storage.ingest(self.db, self.archive, part_b, filename, len(part_a))
+        verified = storage.verify_file(self.db, self.archive, manifest)
+        self.assertTrue(verified["verified"])
+        self.assertEqual(verified["events"], 3)
+        # Verify bytes, SQLite and contiguous receipts before local unlink.
+        original_verifier = uploader.request_file_verification
+        try:
+            uploader.request_file_verification = (
+                lambda url, token, file, size, digest, sid, timeout:
+                storage.verify_file(self.db, self.archive,
+                    dict(source_file=file.name, session=sid, size=size,
+                         sha256=digest)))
+            old = time.time() - 8 * 86400
+            os.utime(path, (old, old))
+            self.assertFalse(uploader.cleanup_file(
+                path, state, checkpoint, "http://unused", "token",
+                retention_days=9), "Must respect minimum age")
+            self.assertTrue(path.exists())
+            self.assertTrue(uploader.cleanup_file(
+                path, state, checkpoint, "http://unused", "token",
+                retention_days=7))
+            self.assertFalse(path.exists())
+            self.assertNotIn(os.path.normcase(str(path.resolve())), state["files"])
+        finally:
+            uploader.request_file_verification = original_verifier
+
+    def test_refuse_legacy_or_incomplete_or_tampered_file(self):
+        session = "niightsiide_20261023T232858Z_315599_3"
+        filename = session + ".jsonl"
+        raw = ndjson(event(session, 1, "session_start", schema=2),
+                     event(session, 2, "session_stop", reason="manual"))
+        path = Path(self.tmp.name) / filename
+        path.write_bytes(raw)
+        stamp = time.time() - 8 * 86400
+        os.utime(path, (stamp, stamp))
+        checkpoint = Path(self.tmp.name) / "checkpoint.json"
+        state = {"version": 1, "files": {
+            os.path.normcase(str(path.resolve())): {"offset": len(raw)}
+        }}
+        storage.ingest(self.db, self.archive, raw, filename)  # legacy receipt absent
+        with self.assertRaises(storage.IngestError):
+            storage.verify_file(self.db, self.archive, dict(
+                source_file=filename, session=session, size=len(raw),
+                sha256=hashlib.sha256(raw).hexdigest()))
+        # A file with no explicit terminal stop is not eligible for cleanup.
+        path.write_bytes(ndjson(event(session, 1, "session_start", schema=2)))
+        os.utime(path, (stamp, stamp))
+        self.assertFalse(uploader.cleanup_file(
+            path, state, checkpoint, "http://unused", "token", retention_days=7))
+        self.assertTrue(path.exists())
+        # If archive was indexed before local tampering, checksum won't match.
+        path.write_bytes(raw)
+        storage.ingest(self.db, self.archive, raw, filename, 0)
+        modified = raw.replace(b'"manual"', b'"forced"')
+        self.assertEqual(len(modified), len(raw))
+        path.write_bytes(modified)
+        os.utime(path, (stamp, stamp))
+        state["files"][os.path.normcase(str(path.resolve()))]["offset"] = len(modified)
+        with self.assertRaises(storage.IngestError):
+            storage.verify_file(self.db, self.archive, dict(
+                source_file=filename, session=session, size=len(modified),
+                sha256=hashlib.sha256(modified).hexdigest()))
+        self.assertTrue(path.exists())
 
 
 class HttpTests(unittest.TestCase):
@@ -199,6 +288,28 @@ class HttpTests(unittest.TestCase):
                       headers={"Authorization": "Bearer " + self.token})
         with urlopen(req) as response:
             self.assertEqual(json.load(response)["events"], 2)
+
+
+    def test_http_end_to_end_closed_file_verification(self):
+        session = "niightsiide_20261023T232858Z_315599_4"
+        source = session + ".jsonl"
+        first = ndjson(event(session, 1, "session_start", schema=2),
+                       event(session, 2, "position", x=1, y=2, z=3))
+        final = ndjson(event(session, 3, "session_stop", reason="rotation_size"))
+        raw = first + final
+        uploader.upload(self.base, self.token, source, first, 2, offset=0)
+        uploader.upload(self.base, self.token, source, final, 1,
+                        offset=len(first))
+        self.assertEqual(uploader.request_file_verification(
+            self.base, self.token, Path(source), len(raw),
+            hashlib.sha256(raw).hexdigest(), session, 15)["events"], 3)
+        # Test token requirement on whole-file receipt route.
+        req = Request(self.base + "/v1/verify-file", method="POST",
+                      data=b"{}", headers={"Content-Type": "application/json"})
+        with self.assertRaises(HTTPError) as err:
+            urlopen(req)
+        self.assertEqual(err.exception.code, 401)
+
 
 
 if __name__ == "__main__":

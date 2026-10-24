@@ -83,6 +83,21 @@ private-LAN binding, an explicit secret token, backup requirements and a
 server-side integration test suite. No server deployment occurs automatically
 when upgrading the Windower addon.
 
+## Item-use requests and travel attribution (v0.2.4)
+
+Outgoing `0x037` item-use packets are retained as `packet_observation` events
+with `packet_kind=item_use_request`, `item_bag` and `item_slot`. When Windower's
+inventory snapshot resolves that slot, the recorder also emits `item_id` and
+its English `item_name` (e.g., Warp Ring or Instant Warp). If the snapshot or
+resource name is unavailable, it still records the original request without
+inventing a name. This is passive observation; no inventory dumps or raw packet
+payloads are stored. Spell action requests remain available through `0x01A`.
+
+A request does **not** prove item activation or successful teleportation.
+Offline analysis should correlate requests with subsequent zone changes and
+preserve unknown or ambiguous causes. In-zone teleports continue to produce
+explicit position discontinuities rather than walking edges.
+
 ## 24/7 capture rotation and verified local retention (v0.2.3)
 
 UnifiedCapture v0.2.3 automatically rotates its **file recording sessions**

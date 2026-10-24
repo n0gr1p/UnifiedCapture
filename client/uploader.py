@@ -103,7 +103,14 @@ def upload_file(path, state, state_path, url, token, timeout=15):
     except FileNotFoundError:
         return 0
     saved = state["files"].get(key, {})
-    offset = int(saved.get("offset", 0))
+    # Older uploader versions tracked acknowledgement offsets, but did not
+    # send the byte ranges needed for whole-file archive verification. Replay
+    # them once (server deduplicates) to establish authoritative receipts.
+    if saved and saved.get("receipted") is not True:
+        LOG.info("Reindexing legacy upload receipts for %s", path.name)
+        offset = 0
+    else:
+        offset = int(saved.get("offset", 0))
     if offset < 0 or size < offset:
         LOG.warning("Capture shrank; resetting upload offset for %s", path.name)
         offset = 0
@@ -116,7 +123,7 @@ def upload_file(path, state, state_path, url, token, timeout=15):
         # Server has already committed. Crash before state write just replays
         # this batch, which the server safely deduplicates.
         offset = end
-        state["files"][key] = {"offset": offset}
+        state["files"][key] = {"offset": offset, "receipted": True}
         save_state(state_path, state)
         total += lines
         LOG.info("%s: sent %d records (%d new, %d already stored)",

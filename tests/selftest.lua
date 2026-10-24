@@ -59,7 +59,7 @@ assert(before:find('"reason":"rotation_duration"',1,true))
 r:flush()
 local second=table.concat(current_files[2].parts)
 assert(second:find('"event":"session_start"',1,true))
-assert(second:find('"recorder_version":"0.2.3"',1,true))
+assert(second:find('"recorder_version":"0.2.4"',1,true))
 -- Fail replacement opening without losing the current recording.
 local count=#current_files
 local original_open=io.open

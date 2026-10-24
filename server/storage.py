@@ -37,6 +37,18 @@ def initialize(db_path):
             record_count INTEGER NOT NULL,
             imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE TABLE IF NOT EXISTS file_chunks (
+            source_file TEXT NOT NULL,
+            start_byte INTEGER NOT NULL,
+            end_byte INTEGER NOT NULL,
+            sha256 TEXT NOT NULL,
+            session TEXT NOT NULL,
+            first_sequence INTEGER NOT NULL,
+            last_sequence INTEGER NOT NULL,
+            record_count INTEGER NOT NULL,
+            PRIMARY KEY (source_file, start_byte)
+        );
+        CREATE INDEX IF NOT EXISTS idx_file_chunks_session ON file_chunks(session);
         CREATE TABLE IF NOT EXISTS sessions (
             session TEXT PRIMARY KEY,
             character TEXT,
@@ -169,7 +181,8 @@ def archive_bytes(archive_dir, raw):
     return digest
 
 
-def import_batch(db_path, records, source_file=None, digest=None):
+def import_batch(db_path, records, source_file=None, digest=None,
+                 start_offset=None, raw_size=None):
     """Single SQLite transaction. Replaying the same batch is idempotent."""
     inserted = duplicates = 0
     with connection(db_path) as db:
@@ -229,10 +242,32 @@ def import_batch(db_path, records, source_file=None, digest=None):
             db.execute(
                 "INSERT OR IGNORE INTO imported_batches(sha256, record_count) VALUES (?,?)",
                 (digest, len(records)))
+        if start_offset is not None:
+            db.execute("""INSERT OR IGNORE INTO file_chunks(
+                source_file, start_byte, end_byte, sha256, session,
+                first_sequence, last_sequence, record_count)
+                VALUES (?,?,?,?,?,?,?,?)""", (
+                source_file, start_offset, start_offset + raw_size, digest,
+                records[0]["session"], records[0]["sequence"],
+                records[-1]["sequence"], len(records)))
     return {"inserted": inserted, "duplicates": duplicates}
 
 
-def check_conflicts(db_path, records):
+def check_conflicts(db_path, records, source_file=None, start_offset=None,
+                    size=None, digest=None):
+    # Each client-visible file byte belongs to at most one committed chunk.
+    # Reject changed retries and overlaps before adding permanent archive bytes.
+    if start_offset is not None:
+        with connection(db_path) as db:
+            rows = db.execute("""SELECT start_byte, end_byte, sha256 FROM file_chunks
+                WHERE source_file=? AND start_byte < ? AND end_byte > ?""",
+                (source_file, start_offset + size, start_offset)).fetchall()
+            for start, end, known_digest in rows:
+                if (start, end, known_digest) != (
+                        start_offset, start_offset + size, digest):
+                    raise IngestError("Conflicting or overlapping file chunk")
+
+def check_event_conflicts(db_path, records):
     """Reject changed-payload retries before they enter the immutable archive."""
     with connection(db_path) as db:
         for obj in records:
@@ -244,20 +279,91 @@ def check_conflicts(db_path, records):
                 raise IngestError("Conflicting payload for existing session/sequence")
 
 
-def ingest(db_path, archive_dir, raw, source_file=None):
+def ingest(db_path, archive_dir, raw, source_file=None, start_offset=None):
     records = parse_batch(raw)
     # Filenames are only advisory metadata; never user-controlled paths.
     if source_file is not None and (
         not isinstance(source_file, str) or len(source_file) > 160 or
         any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-" for c in source_file)):
         raise IngestError("Invalid source file label")
-    # A single-server lock also keeps preflight and archive/SQL commit ordered.
-    # This prevents conflicting retries from poisoning the recovery archive.
+    digest = hashlib.sha256(raw).hexdigest()
+    if start_offset is not None:
+        if (type(start_offset) is not int or start_offset < 0 or
+                start_offset > 2**53 or not source_file):
+            raise IngestError("Invalid source file offset")
+        session = records[0]["session"]
+        if (any(e["session"] != session or
+                e["sequence"] != records[0]["sequence"] + i
+                for i, e in enumerate(records))):
+            raise IngestError("File chunk contains mixed sessions or sequence gaps")
+    # Lock preflight through commit so conflicting retries cannot poison archives.
     with INGEST_LOCK:
-        check_conflicts(db_path, records)
+        check_conflicts(db_path, records, source_file, start_offset,
+                        len(raw), digest)
+        check_event_conflicts(db_path, records)
         digest = archive_bytes(archive_dir, raw)
-        result = import_batch(db_path, records, source_file, digest)
+        result = import_batch(db_path, records, source_file, digest,
+                              start_offset, len(raw))
     return dict(result, count=len(records), sha256=digest)
+
+
+
+def verify_file(db_path, archive_dir, manifest):
+    """Verify complete byte coverage, durable blobs, DB rows and terminal stop.
+
+    Never assert that a file is safe to delete based on a client offset alone.
+    """
+    if not isinstance(manifest, dict):
+        raise IngestError("Invalid verification request")
+    source = manifest.get("source_file")
+    session = manifest.get("session")
+    size = manifest.get("size")
+    checksum = manifest.get("sha256")
+    if (not isinstance(session, str) or
+            not isinstance(source, str) or source != session + ".jsonl" or
+            len(source) > 160 or
+            type(size) is not int or size <= 0 or size > 1024**3 or
+            not isinstance(checksum, str) or len(checksum) != 64 or
+            any(ch not in "0123456789abcdef" for ch in checksum)):
+        raise IngestError("Invalid file verification metadata")
+    with connection(db_path) as db:
+        chunks = db.execute("""SELECT f.start_byte, f.end_byte, f.sha256,
+            f.first_sequence, f.last_sequence, f.record_count, b.record_count
+            FROM file_chunks f LEFT JOIN imported_batches b ON b.sha256=f.sha256
+            WHERE f.source_file=? AND f.session=? ORDER BY f.start_byte""",
+            (source, session)).fetchall()
+        if not chunks:
+            raise IngestError("No indexed receipts for recording")
+        position = 0
+        next_sequence = 1
+        sha = hashlib.sha256()
+        for start, end, digest, first, last, count, committed_count in chunks:
+            if (start != position or end <= start or
+                    first != next_sequence or last != first + count - 1 or
+                    committed_count != count):
+                raise IngestError("Missing or uncommitted recording chunk")
+            pathname = Path(archive_dir) / "batches" / (digest + ".jsonl")
+            try:
+                raw = pathname.read_bytes()
+            except OSError as exc:
+                raise IngestError("Missing archived recording chunk") from exc
+            if (len(raw) != end - start or
+                    hashlib.sha256(raw).hexdigest() != digest):
+                raise IngestError("Archive blob failed checksum validation")
+            sha.update(raw)
+            position = end
+            next_sequence = last + 1
+        if position != size or sha.hexdigest() != checksum:
+            raise IngestError("Recording checksum/length differs from Linux archive")
+        bounds = db.execute("""SELECT COUNT(*), MIN(sequence), MAX(sequence),
+            SUM(CASE WHEN sequence=1 AND event_type='session_start' THEN 1 ELSE 0 END),
+            SUM(CASE WHEN sequence=? AND event_type='session_stop' THEN 1 ELSE 0 END)
+            FROM events WHERE session=?""",
+            (next_sequence - 1, session)).fetchone()
+        if bounds != (next_sequence - 1, 1, next_sequence - 1, 1, 1):
+            raise IngestError("SQLite recording is incomplete or not closed")
+    return {"verified": True, "session": session, "source_file": source,
+            "size": size, "sha256": checksum, "events": next_sequence - 1}
 
 
 def recover(db_path, archive_dir):

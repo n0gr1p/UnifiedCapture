@@ -11,7 +11,7 @@ local FLUSH_INTERVAL = 2.0
 local ROTATE_SECONDS = 24 * 60 * 60
 local ROTATE_BYTES = 64 * 1024 * 1024
 local PACKETS = {
-    outgoing = { [0x01A] = 'action_request', [0x05B] = 'menu_selection', [0x05C] = 'warp_request', [0x05E] = 'zone_request' },
+    outgoing = { [0x01A] = 'action_request', [0x037] = 'item_use_request', [0x05B] = 'menu_selection', [0x05C] = 'warp_request', [0x05E] = 'zone_request' },
     incoming = { [0x032] = 'npc_menu', [0x033] = 'npc_menu_string',
         [0x034] = 'npc_menu', [0x052] = 'npc_release',
         [0x05C] = 'menu_parameters', [0x00A] = 'zone_packet' },
@@ -134,7 +134,7 @@ local function begin_segment(self, file, id)
     self.entity_zone, self.menu, self.menu_counter = nil, nil, 0
     self.last_sample, self.last_flush = 0, self.env.now()
     self.session_started_at = self.env.now()
-    self:emit('session_start', {schema=2, recorder_version='0.2.3'})
+    self:emit('session_start', {schema=2, recorder_version='0.2.4'})
     self:tick(true)
 end
 function P:rotate(reason)
@@ -320,6 +320,22 @@ local function observe_menu(self, direction, id, p, e, at, zone)
     end
 end
 
+-- Item-use packets carry a bag and slot, not an item ID. Resolve from the
+-- current local inventory if available; keep the raw request if lookup fails.
+local function resolve_item(self, bag, slot)
+    if bag == nil or slot == nil or not self.env.item then return nil, nil end
+    local ok, item = pcall(self.env.item, bag, slot)
+    if not ok or type(item) ~= 'table' then return nil, nil end
+    local item_id = finite(item.id)
+    if not item_id or item_id <= 0 then return nil, nil end
+    local name
+    if self.env.item_name then
+        local named, value = pcall(self.env.item_name, item_id)
+        if named then name = clean_name(value) end
+    end
+    return item_id, name
+end
+
 function P:packet(direction, id, bytes, injected, blocked)
     if not self.active or blocked or type(bytes) ~= 'string' then return end
     local is_entity = direction == 'incoming' and ENTITY_PACKETS[id]
@@ -362,6 +378,10 @@ function P:packet(direction, id, bytes, injected, blocked)
         zone_id=finite(p['Zone']),
         release_type=direction == 'incoming' and id == 0x052 and finite(p['Type']) or nil,
         zone_line=direction == 'outgoing' and id == 0x05E and finite(p['Zone Line']) or nil}
+    if direction == 'outgoing' and id == 0x037 then
+        event.item_bag, event.item_slot = finite(p['Bag']), finite(p['Slot'])
+        event.item_id, event.item_name = resolve_item(self, event.item_bag, event.item_slot)
+    end
     if direction == 'outgoing' and id == 0x05B then
         event.automated_message = p['Automated Message'] == true or p['Automated Message'] == 1
     end

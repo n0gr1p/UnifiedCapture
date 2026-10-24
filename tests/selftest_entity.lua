@@ -162,7 +162,7 @@ assert(mismatch.entity_name=='SmallPacketName' and
 local capture = require('capture')
 local clock, zone, x = 2000, 256, 5
 local rows, decoded, log_messages = {}, {}, {}
-local fakefile = {write=function(_,s) rows[#rows+1]=s end,flush=function() end,close=function() end}
+local fakefile = {write=function(self,s) rows[#rows+1]=s; return self end,flush=function() return true end,close=function() return true end}
 local oldopen = io.open
 io.open = function() return fakefile end
 local c = capture.new({
@@ -252,7 +252,7 @@ c:stop('test')
 io.open = oldopen
 local jsonl=table.concat(rows)
 assert(jsonl:find('"schema":2',1,true))
-assert(jsonl:find('"recorder_version":"0.2.2"',1,true))
+assert(jsonl:find('"recorder_version":"0.2.3"',1,true))
 assert(jsonl:find('"packet_id":91',1,true) and jsonl:find('"entity_kind":"monster"',1,true))
 assert(jsonl:find('"observer_x":5',1,true), 'original observer position preserved')
 assert(jsonl:find('"observation_kind":"last_seen"',1,true))

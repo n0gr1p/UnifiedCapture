@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from storage import IngestError, MAX_BODY_BYTES, ingest, initialize, recover, stats
+from storage import IngestError, MAX_BODY_BYTES, ingest, initialize, recover, stats, verify_file
 
 LOG = logging.getLogger("unifiedcapture")
 
@@ -55,13 +55,16 @@ def serve(host, port, db_path, archive_dir, token):
                 self.respond(404, {"error": "not found"})
 
         def do_POST(self):
-            if urlsplit(self.path).path != "/v1/ingest":
+            path = urlsplit(self.path).path
+            if path not in ("/v1/ingest", "/v1/verify-file"):
                 self.respond(404, {"error": "not found"})
                 return
             if not self.authorized():
                 return
-            if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/x-ndjson":
-                self.respond(415, {"error": "expected application/x-ndjson"})
+            expected = ("application/json" if path == "/v1/verify-file"
+                        else "application/x-ndjson")
+            if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != expected:
+                self.respond(415, {"error": "expected " + expected})
                 return
             if self.headers.get("Transfer-Encoding"):
                 self.respond(400, {"error": "chunked requests unsupported"})
@@ -78,8 +81,23 @@ def serve(host, port, db_path, archive_dir, token):
                 self.respond(400, {"error": "incomplete batch"})
                 return
             try:
-                self.respond(200, ingest(
-                    db_path, archive_dir, raw, self.headers.get("X-UCAP-Source")))
+                if path == "/v1/verify-file":
+                    try:
+                        manifest = json.loads(raw.decode("utf-8"))
+                    except (ValueError, UnicodeError) as exc:
+                        raise IngestError("Malformed verification JSON") from exc
+                    self.respond(200, verify_file(db_path, archive_dir, manifest))
+                else:
+                    offset_header = self.headers.get("X-UCAP-Offset")
+                    if offset_header is not None:
+                        if not offset_header.isascii() or not offset_header.isdigit():
+                            raise IngestError("Invalid upload offset")
+                        offset = int(offset_header)
+                    else:
+                        offset = None  # Backward compatible; no deletion receipt.
+                    self.respond(200, ingest(
+                        db_path, archive_dir, raw,
+                        self.headers.get("X-UCAP-Source"), offset))
             except IngestError as exc:
                 self.respond(400, {"error": str(exc)})
             except Exception:

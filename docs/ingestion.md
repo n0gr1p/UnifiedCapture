@@ -11,6 +11,13 @@ Windower client(s) -> JSONL files -> one Windows Python uploader
   -> SQLite WAL database -> future navigation/coverage analyses
 ```
 
+- The Lua recorder v0.2.3 rolls each file at 24 hours or 64 MiB
+  (whichever occurs first) without logout. Each segment has its own session ID,
+  terminal `session_stop`, initial `session_start`, and a fresh observer
+  anchor. A replacement-file open failure keeps the prior recording active.
+- Optional uploader retention cleans up only old, fully verified, closed files.
+  Retention is disabled by default. The recommended opt-in is
+  `--retention-days 7`.
 - One uploader can watch one or more `data/captures` folders. Six characters
   using a shared Windower installation normally share the same folder.
 - Files are read by complete newline-terminated records only, so a game
@@ -133,3 +140,66 @@ python3 -m unittest discover -s tests -p 'test_ingestion.py' -v
 Tests cover request authentication, validated import, exact raw archive,
 duplicate uploads, crash recovery, an active partial JSONL line, checkpoint
 retries, and normalized table contents.
+
+## 24/7 rotation and safe Windows cleanup
+
+**Recording segmentation is unrelated to player logout.** The v0.2.3 Lua
+recorder rotates every 24 hours or 64 MiB, creating a new segment and
+`session_start`, while leaving the character online. An old segment contains
+a `session_stop` event explicitly marking closure. A failed attempt to open
+the next file does not interrupt the old recording. On successful rotation
+the local in-memory sighting/menu windows reset, as expected for a new capture
+session; zone and actor context are preserved in the emitted records.
+
+**Server whole-file attestation:** the updated uploader sends
+`X-UCAP-Offset` for each JSONL batch. The server commits this byte range,
+batch SHA-256 and event-sequence range in the same SQLite transaction as the
+events. `POST /v1/verify-file` checks contiguous bytes starting at zero,
+contiguous event sequences starting at one, every permanent archived batch's
+SHA-256, a matching complete-file SHA-256 and length, corresponding SQLite
+rows, and an actual final `session_stop`. Only when all checks pass can the
+uploader delete the original Windows file. No partially uploaded or still-open
+capture can pass verification.
+
+**Safe rollout order:** update and rebuild the **Linux server first**;
+then update the **Windows uploader and Windower Lua addon**. The previous
+uploader does not supply the new file-range receipts. The new uploader
+detects checkpoints written by that earlier version and safely replays their
+already-acknowledged bytes once with offsets; existing events are
+deduplicated. The migration may produce a short burst of "already stored"
+records without changing the observation counts.
+
+Cleanup remains opt-in; to enable seven-day retention, append the following
+argument to the Python uploader command in your scheduled PowerShell launcher
+(after the server and Windows updates, and once a verification test passes):
+
+```powershell
+--retention-days 7
+```
+
+Keep the existing scheduled task; do not create a second uploader. Stop
+and restart that task after updating its launcher. This removes only files
+older than seven days that the server has explicitly verified. Without that
+flag no file is removed. A terminal `session_stop` is required: abnormal
+crash leftovers and files with missing evidence are retained for inspection
+rather than guessed closed. Requests refused by Linux, changed file sizes or
+timestamps, checksum mismatches and network interruptions **fail closed**.
+
+If a verified file is deleted, its local checkpoint entry is also retired.
+The Linux SHA-addressed batch archive and SQLite rows remain permanent.
+Server disk retention/backup is a separate policy and **must not** be tied
+to deletion of the only local copies.
+
+To inspect the service after upgrading:
+```sh
+sudo docker compose ps
+sudo docker compose logs --tail=30 ingest
+```
+
+To manually check server ingestion and the new API integrity:
+```powershell
+Invoke-RestMethod -Uri "http://192.168.96.45:8787/v1/stats" -Headers @{ Authorization = "Bearer $env:UCAP_API_TOKEN" }
+```
+
+Note: the IP above is the user's existing LAN server binding; update it if
+the server's LAN IP changes. The service is intended only for a trusted LAN.

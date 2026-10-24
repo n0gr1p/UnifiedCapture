@@ -148,6 +148,29 @@ class UploaderTests(StoreTests):
 
 
 
+    def test_overlapping_or_changed_byte_ranges_cannot_be_archived(self):
+        session = "niightsiide_20261023T232858Z_315599_6"
+        source = session + ".jsonl"
+        first = ndjson(event(session, 1, "session_start", schema=2))
+        second = ndjson(event(session, 2, "session_stop", reason="rotation_size"))
+        storage.ingest(self.db, self.archive, first, source, 0)
+        with self.assertRaisesRegex(storage.IngestError, "overlapping"):
+            storage.ingest(self.db, self.archive, second, source, 0)
+        with self.assertRaisesRegex(storage.IngestError, "overlapping"):
+            storage.ingest(self.db, self.archive, second, source, len(first) - 5)
+        self.assertEqual(len(list((self.archive / "batches").glob("*.jsonl"))), 1)
+        self.assertEqual(storage.stats(self.db)["events"], 1)
+        storage.ingest(self.db, self.archive, second, source, len(first))
+        manifest = dict(source_file=source, session=session,
+                        size=len(first) + len(second),
+                        sha256=hashlib.sha256(first + second).hexdigest())
+        self.assertTrue(storage.verify_file(self.db, self.archive, manifest)["verified"])
+        # Corrupting the permanent archive invalidates whole-file verification.
+        digest = hashlib.sha256(second).hexdigest()
+        (self.archive / "batches" / (digest + ".jsonl")).write_bytes(second + b"x")
+        with self.assertRaisesRegex(storage.IngestError, "checksum"):
+            storage.verify_file(self.db, self.archive, manifest)
+
     def test_legacy_checkpoint_reindexes_chunks_without_new_events(self):
         session = "niightsiide_20261023T232858Z_315599_5"
         filename = session + ".jsonl"

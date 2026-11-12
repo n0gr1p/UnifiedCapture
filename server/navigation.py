@@ -5,6 +5,7 @@ teleport links. No arbitrary SQL, file paths, or mutation controls are exposed.
 """
 import json
 import re
+from contextlib import closing
 import sqlite3
 from pathlib import Path
 
@@ -45,7 +46,7 @@ def _page(limit, offset):
 
 
 def dataset(db_path):
-    with _read_connection(db_path) as db:
+    with closing(_read_connection(db_path)) as db:
         events = db.execute("SELECT COUNT(*) AS total, MAX(observed_at) AS newest FROM events").fetchone()
         sessions = db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
         positions = db.execute("SELECT COUNT(*) FROM positions").fetchone()[0]
@@ -62,7 +63,7 @@ def dataset(db_path):
 
 def zones(db_path, limit=50, offset=0):
     limit, offset = _page(limit, offset)
-    with _read_connection(db_path) as db:
+    with closing(_read_connection(db_path)) as db:
         rows = db.execute("""
             SELECT p.zone AS zone, COUNT(*) AS samples,
                    COUNT(DISTINCT p.session) AS sessions,
@@ -86,7 +87,7 @@ def transitions(db_path, limit=50, offset=0, from_zone=None):
         bounded_int(from_zone, "from_zone", 0, 65535)
     where = "AND CAST(json_extract(raw_json,'$.old_zone') AS INTEGER)=?" if from_zone is not None else ""
     values = ([from_zone] if from_zone is not None else []) + [limit, offset]
-    with _read_connection(db_path) as db:
+    with closing(_read_connection(db_path)) as db:
         rows = db.execute(f"""
             SELECT CAST(json_extract(raw_json,'$.old_zone') AS INTEGER) AS from_zone,
                    CAST(json_extract(raw_json,'$.new_zone') AS INTEGER) AS to_zone,
@@ -113,7 +114,7 @@ def sessions(db_path, zone=None, limit=50, offset=0):
     limit, offset = _page(limit, offset)
     if zone is not None:
         bounded_int(zone, "zone", 0, 65535)
-    with _read_connection(db_path) as db:
+    with closing(_read_connection(db_path)) as db:
         if zone is None:
             rows = db.execute("""
                 SELECT s.session, s.character, s.started_at,
@@ -146,7 +147,7 @@ def route_events(db_path, session, after_sequence=0, limit=100, include_interact
         predicates += """ OR (event_type='packet_observation' AND (
             json_type(raw_json,'$.interaction_stage') IS NOT NULL
             OR json_extract(raw_json,'$.packet_kind')='item_use_request'))"""
-    with _read_connection(db_path) as db:
+    with closing(_read_connection(db_path)) as db:
         known = db.execute("SELECT 1 FROM sessions WHERE session=?", (session,)).fetchone()
         if not known:
             raise NavigationQueryError("unknown session")
@@ -154,9 +155,10 @@ def route_events(db_path, session, after_sequence=0, limit=100, include_interact
             SELECT sequence, observed_at, zone, event_type, raw_json
             FROM events WHERE session=? AND sequence>? AND ({predicates})
             ORDER BY sequence LIMIT ?
-        """, (session, after_sequence, limit)).fetchall()
+        """, (session, after_sequence, limit + 1)).fetchall()
+    has_more = len(rows) > limit
     records = []
-    for row in rows:
+    for row in rows[:limit]:
         original = json.loads(row["raw_json"])
         record = {"sequence": row["sequence"], "at": row["observed_at"],
                   "zone": row["zone"], "event": row["event_type"]}
@@ -165,6 +167,6 @@ def route_events(db_path, session, after_sequence=0, limit=100, include_interact
     return {
         "session": session, "after_sequence": after_sequence, "limit": limit,
         "events": records, "next_after_sequence": records[-1]["sequence"] if records else None,
-        "has_more": len(records) == limit,
+        "has_more": has_more,
         "interpretation": "Observations only; no automatic classification of walking, teleportation, or successful NPC travel."
     }

@@ -1,7 +1,7 @@
 FROM python:3.12-alpine
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /srv
-COPY server/storage.py server/app.py ./
+COPY server/storage.py server/navigation.py server/app.py ./
 RUN addgroup -S -g 10001 capture && adduser -S -D -u 10001 -G capture capture && mkdir -p /data && chown capture:capture /data
 USER capture
 EXPOSE 8787

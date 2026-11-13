@@ -4,14 +4,14 @@ on:
     paths:
       - 'server/**'
       - 'client/**'
-      - 'tests/test_ingestion.py'
+      - 'tests/test_*.py'
       - 'compose.yaml'
       - '.github/workflows/ingestion.yml'
   pull_request:
     paths:
       - 'server/**'
       - 'client/**'
-      - 'tests/test_ingestion.py'
+      - 'tests/test_*.py'
       - 'compose.yaml'
       - '.github/workflows/ingestion.yml'
 jobs:
@@ -24,7 +24,7 @@ jobs:
           python-version: '3.12'
       - name: Compile and test stdlib Python implementation
         run: |
-          python -m compileall -q server client tests/test_ingestion.py
-          python -m unittest discover -s tests -p 'test_ingestion.py' -v
+          python -m compileall -q server client tests
+          python -m unittest discover -s tests -p 'test_*.py' -v
       - name: Docker image build
         run: docker build -f server/Dockerfile -t unifiedcapture-ingest:test .

@@ -72,6 +72,11 @@ def initialize(db_path):
             ON events(zone, observed_at);
         CREATE INDEX IF NOT EXISTS idx_events_type_time
             ON events(event_type, observed_at);
+        -- Cover read-only zone summaries without joining 2.4M+ positions
+        -- to the much larger events table. Built once on upgrade.
+        CREATE INDEX IF NOT EXISTS idx_events_position_zone_session_time
+            ON events(zone, session, observed_at)
+            WHERE event_type='position' AND zone IS NOT NULL;
         CREATE TABLE IF NOT EXISTS positions (
             session TEXT NOT NULL, sequence INTEGER NOT NULL,
             zone INTEGER, x REAL, y REAL, z REAL, reason TEXT,

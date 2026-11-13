@@ -61,20 +61,25 @@ def dataset(db_path):
         }
 
 
+# The position-only partial index is maintained by storage.initialize().
+# It avoids millions of random primary-key joins into the large events table.
+# zone + session order also makes the distinct-session aggregation efficient.
+ZONE_COVERAGE_SQL = """
+    SELECT zone, COUNT(*) AS samples,
+           COUNT(DISTINCT session) AS sessions,
+           MIN(observed_at) AS first_seen_at,
+           MAX(observed_at) AS last_seen_at
+    FROM events INDEXED BY idx_events_position_zone_session_time
+    WHERE event_type='position' AND zone IS NOT NULL
+    GROUP BY zone
+    ORDER BY samples DESC, zone ASC LIMIT ? OFFSET ?
+"""
+
+
 def zones(db_path, limit=50, offset=0):
     limit, offset = _page(limit, offset)
     with closing(_read_connection(db_path)) as db:
-        rows = db.execute("""
-            SELECT p.zone AS zone, COUNT(*) AS samples,
-                   COUNT(DISTINCT p.session) AS sessions,
-                   MIN(e.observed_at) AS first_seen_at,
-                   MAX(e.observed_at) AS last_seen_at
-            FROM positions p
-            JOIN events e ON e.session=p.session AND e.sequence=p.sequence
-            WHERE p.zone IS NOT NULL
-            GROUP BY p.zone
-            ORDER BY samples DESC, p.zone ASC LIMIT ? OFFSET ?
-        """, (limit, offset)).fetchall()
+        rows = db.execute(ZONE_COVERAGE_SQL, (limit, offset)).fetchall()
     return {
         "zones": [dict(row) for row in rows], "limit": limit, "offset": offset,
         "interpretation": "Observed position sample counts; not coverage completeness or navigability."

@@ -119,3 +119,7 @@ or incomplete/crashed recordings. The default uploader behavior remains
 Older uploader checkpoints are replayed once after the upgrade to construct
 verifiable chunk receipts; the server deduplicates their already-imported
 events. See [deployment and safety details](docs/ingestion.md).
+
+## Navigation intelligence architecture (planned)
+
+The accepted [two-tier architecture decision](docs/adr/0001-raw-telemetry-to-navigation-intelligence.md) keeps authoritative mass telemetry on the large HDD and publishes a **small, versioned, rebuildable navigation SQLite** to NVMe for eventual low-latency UnifiedCombat planning. Inferred paths and teleport links are **not executable** without explicit validation. See the [cross-repository implementation tracker](docs/navigation-implementation-tracker.md) and its [GitHub epic](https://github.com/n0gr1p/UnifiedCapture/issues/5). This is a roadmap, not an implemented movement executor.

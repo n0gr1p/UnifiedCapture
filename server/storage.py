@@ -6,6 +6,7 @@ import os
 import sqlite3
 import tempfile
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 MAX_BODY_BYTES = 1024 * 1024
@@ -18,13 +19,24 @@ class IngestError(ValueError):
     pass
 
 
+@contextmanager
 def connection(db_path):
+    """Transaction and SQLite lifetime: commit/rollback and always close.
+
+    sqlite3.Connection.__exit__ handles the transaction but does NOT close
+    the connection. With frequent ingestion requests, waiting for cyclic GC
+    to collect those connections can exhaust the container's file descriptors.
+    """
     db = sqlite3.connect(db_path, timeout=30)
-    db.execute("PRAGMA busy_timeout = 30000")
-    db.execute("PRAGMA journal_mode = WAL")
-    db.execute("PRAGMA synchronous = FULL")
-    db.execute("PRAGMA foreign_keys = ON")
-    return db
+    try:
+        db.execute("PRAGMA busy_timeout = 30000")
+        db.execute("PRAGMA journal_mode = WAL")
+        db.execute("PRAGMA synchronous = FULL")
+        db.execute("PRAGMA foreign_keys = ON")
+        with db:
+            yield db
+    finally:
+        db.close()
 
 
 def initialize(db_path):

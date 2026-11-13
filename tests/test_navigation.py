@@ -1,4 +1,5 @@
 """Offline navigation evidence tests: query correctness and fail-closed inputs."""
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -52,6 +53,31 @@ class NavigationTests(unittest.TestCase):
         zones = navigation.zones(self.db)["zones"]
         self.assertEqual({z["zone"]: (z["samples"], z["sessions"]) for z in zones},
                          {50: (2, 2), 51: (2, 2), 52: (1, 1)})
+
+    def test_zone_coverage_is_index_only_and_matches_legacy(self):
+        # Exercise the real query and query plan, rather than timing-sensitive
+        # assertions that depend on the test runner's disk/CPU speed.
+        with sqlite3.connect(self.db) as db:
+            expected = db.execute("""
+                SELECT p.zone, COUNT(*), COUNT(DISTINCT p.session),
+                       MIN(e.observed_at), MAX(e.observed_at)
+                FROM positions p
+                JOIN events e ON e.session=p.session AND e.sequence=p.sequence
+                WHERE p.zone IS NOT NULL
+                GROUP BY p.zone ORDER BY COUNT(*) DESC, p.zone ASC
+            """).fetchall()
+            plan = [row[3] for row in db.execute(
+                "EXPLAIN QUERY PLAN " + navigation.ZONE_COVERAGE_SQL, (50, 0))]
+        actual = navigation.zones(self.db, limit=50)["zones"]
+        self.assertEqual([
+            (z["zone"], z["samples"], z["sessions"],
+             z["first_seen_at"], z["last_seen_at"]) for z in actual
+        ], expected)
+        self.assertTrue(any(
+            "USING COVERING INDEX idx_events_position_zone_session_time" in step
+            for step in plan
+        ), plan)
+        self.assertEqual(navigation.zones(self.db, limit=1, offset=1)["zones"][0]["zone"], 51)
 
     def test_transitions_are_observations_not_walkable_edges(self):
         edges = navigation.transitions(self.db)["transitions"]

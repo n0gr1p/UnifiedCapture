@@ -57,7 +57,7 @@ class RoutePreviewTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "No directed"):
             preview.preview(self.dst, 247, "2,1,0", "0,0,0")
         with self.assertRaisesRegex(ValueError, "No recorded navigation node"):
-            preview.preview(self.dst, 247, "0,0,0", "10,0,0")
+            preview.preview(self.dst, 247, "0,0,0", "50,0,0")
         with self.assertRaisesRegex(ValueError, "No recorded navigation node"):
             preview.preview(self.dst, 248, "0,0,0", "1,0,0")
 
@@ -78,7 +78,9 @@ class RoutePreviewTests(unittest.TestCase):
     def test_detour_guard_rejects_long_route(self):
         with sqlite3.connect(self.dst) as db:
             db.execute("PRAGMA foreign_keys=ON")
+            db.execute("DELETE FROM evidence_ref WHERE walk_edge_id=102")
             db.execute("DELETE FROM walk_edge WHERE edge_id=102")
+            db.execute("UPDATE walk_edge SET cost=100 WHERE edge_id=105")
             db.execute("INSERT INTO node(node_id,zone_id,x,y,z) VALUES (6,247,0,10,0)")
             db.execute("INSERT INTO node(node_id,zone_id,x,y,z) VALUES (7,247,2,10,0)")
             db.executemany("""

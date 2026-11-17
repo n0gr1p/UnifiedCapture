@@ -239,7 +239,7 @@ def import_candidates(nav_path, doc):
 
 
 
-def manifest_sessions(path):
+def manifest_sessions(path, expected_zone):
     """Explicit, audited session manifest; no expensive whole-corpus ranking."""
     path = Path(path).expanduser()
     if path.stat().st_size > 32768:
@@ -248,6 +248,8 @@ def manifest_sessions(path):
     if (not isinstance(data, dict) or not isinstance(data.get("sessions"), list)
             or not 1 <= len(data["sessions"]) <= 10):
         raise ValueError("Expected JSON object with 1 to 10 sessions")
+    if type(data.get("zone")) is not int or data["zone"] != expected_zone:
+        raise ValueError("Manifest zone does not match requested zone")
     sessions = data["sessions"]
     if any(not isinstance(s, str) or not 1 <= len(s) <= 128 for s in sessions):
         raise ValueError("Invalid session identifier in manifest")
@@ -334,7 +336,7 @@ def main(argv=None):
         print(json.dumps(import_candidates(args.nav_db, json.loads(data)),
                          indent=2, sort_keys=True))
     elif args.command == "extract-batch":
-        extract_batch(args.raw_db, args.zone, manifest_sessions(args.manifest),
+        extract_batch(args.raw_db, args.zone, manifest_sessions(args.manifest, args.zone),
                       args.max_positions, args.max_windows,
                       lambda line: print(line, end="", flush=True))
     else:

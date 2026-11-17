@@ -33,3 +33,6 @@ sudo python3 "$repo/server/walk_candidate_miner.py" extract-batch \
   --max-positions 1200 --max-windows 2 \
 | python3 "$repo/server/walk_candidate_miner.py" import-batch \
   --nav-db "$nav_db"
+
+echo "Read-only directed graph connectivity and repeat-evidence report:" >&2
+python3 "$repo/server/nav_graph_report.py" --nav-db "$nav_db" --zone 247

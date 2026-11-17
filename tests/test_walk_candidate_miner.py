@@ -174,7 +174,7 @@ class WalkingCandidateTests(unittest.TestCase):
     def test_multi_window_bad_input_is_rejected_without_raw_write(self):
         before = self.raw.read_bytes()
         docs = []
-        with self.assertRaisesRegex(ValueError, "1 to 10"):
+        with self.assertRaisesRegex(ValueError, "At most 10"):
             miner.extract_batch(self.raw, 247, [self.session] * 11,
                                 max_positions=5, max_windows=1,
                                 write=docs.append)

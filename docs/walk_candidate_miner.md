@@ -111,3 +111,40 @@ remains `release_status=not_built`.
 **Important:** This is a bounded field test, not a background daemon,
 automated cross-zone mining, or proof of walkability. If the HDD's ingestion
 or file verification becomes slow, stop the pilot and resolve NAV-00 first.
+
+
+## Read-only topology and repeat-evidence report
+
+The pilot now prints an automatic graph report after a successful import.
+For an already imported dataset, analyze it **without re-reading the HDD**:
+
+```bash
+python3 ~/UnifiedCapture-NavDev/server/nav_graph_report.py \
+  --nav-db ~/UnifiedCapture-NavDev/nav-data/navigation.sqlite3 --zone 247
+```
+
+The report checks the derived navigation schema identity, then reads only
+its zone-specific nodes, walking edges and compact evidence references.
+It reports total and largest weakly connected components; strong
+(directed round-trip) component sizes; one-way start/end nodes; branching;
+evidence repeated on edges and evidence spanning distinct recording
+sessions; and up to five directed candidate routes from selected graph
+roots, reporting endpoints and lengths.
+
+**Interpretation:**
+- Weak connectivity ignores walking direction; it cannot justify bidirectional
+  travel. Strong connectivity reflects graph reachability but still cannot
+  prove physical walkability.
+- The reported directed route distances are **shortest graph distances from
+  selected roots to their furthest reached endpoints**, not globally longest
+  routes, and are **not executable**.
+- Candidate routes can cross observed edges from different sessions sharing
+  quantized nodes. They require geometry and live validation before execution.
+- A repeated source reference is not independently corroborated navigation.
+  The report separately counts edges observed in **distinct sessions**.
+- The path-candidate search intentionally caps sample source roots/components
+  for bounded runtime and flags when it is limited.
+
+It never modifies the source HDD or NVMe, never promotes an edge, and never
+sends movement to UC. NAV-04 must validate, NAV-05 publish, and NAV-09 opt
+in before guarded execution.

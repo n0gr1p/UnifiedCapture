@@ -1,0 +1,11 @@
+{
+  "zone": 247,
+  "note": "Bounded pilot: sessions with high recorded zone-247 moving counts. All edges remain candidates, never executable.",
+  "sessions": [
+    "niightsiide_20261115T154148Z_348932_5",
+    "terrasjr_20261114T210049Z_369018_5",
+    "nyoourke_20261031T014610Z_694131_6",
+    "redrogue_20261031T014943Z_728199_6",
+    "etamame_20261031T015025Z_114189_6"
+  ]
+}

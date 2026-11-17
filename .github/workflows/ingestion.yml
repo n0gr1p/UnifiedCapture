@@ -3,6 +3,10 @@ on:
   push:
     paths:
       - 'server/**'
+      - 'scripts/mine_zone247_pilot.sh'
+      - 'scripts/preview_zone247_candidate.sh'
+      - 'scripts/export_nav_mvp_pilot.sh'
+      - 'scripts/export_nav_mvp_route.py'
       - 'client/**'
       - 'tests/test_*.py'
       - 'compose.yaml'
@@ -26,5 +30,11 @@ jobs:
         run: |
           python -m compileall -q server client tests
           python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Check navigation pilot shell syntax
+        run: bash -n scripts/mine_zone247_pilot.sh
+      - name: Check route preview shell syntax
+        run: bash -n scripts/preview_zone247_candidate.sh
+      - name: Check navigation MVP exporter shell syntax
+        run: bash -n scripts/export_nav_mvp_pilot.sh
       - name: Docker image build
         run: docker build -f server/Dockerfile -t unifiedcapture-ingest:test .

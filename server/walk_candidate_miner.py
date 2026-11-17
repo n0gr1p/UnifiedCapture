@@ -84,7 +84,7 @@ def extract(raw_db_path, zone, session, max_positions=800):
         if not valid_xyz(start) or not valid_xyz(end):
             reasons["invalid_coordinates"] += 1
             continue
-        if reason_a not in ("anchor", "moving", "heartbeat") or reason_b != "moving":
+        if reason_a not in ("anchor", "new_anchor", "moving", "heartbeat") or reason_b != "moving":
             reasons["not_continuous_movement"] += 1
             continue
         if (bisect.bisect_right(markers, seq_a) < len(markers)

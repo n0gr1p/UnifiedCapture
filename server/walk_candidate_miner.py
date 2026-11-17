@@ -44,11 +44,13 @@ def valid_xyz(row):
                and abs(row[k]) < 1_000_000 for k in ("x", "y", "z"))
 
 
-def extract(raw_db_path, zone, session, max_positions=800):
+def extract(raw_db_path, zone, session, max_positions=800, after_sequence=0):
     if not 0 <= zone <= 65535 or not 1 <= len(session) <= 128:
         raise ValueError("Invalid zone or recording session")
     if not 2 <= max_positions <= MAX_POSITIONS:
         raise ValueError("max_positions must be between 2 and 2000")
+    if type(after_sequence) is not int or not 0 <= after_sequence <= 2147483647:
+        raise ValueError("Invalid source sequence cursor")
 
     # One bounded session/range only. Never take a long-lived full-corpus
     # snapshot against the ingest writer on the HDD.
@@ -58,9 +60,9 @@ def extract(raw_db_path, zone, session, max_positions=800):
             SELECT p.sequence, e.observed_at, p.x, p.y, p.z, p.reason
             FROM positions AS p
             JOIN events AS e ON e.session=p.session AND e.sequence=p.sequence
-            WHERE p.session=? AND p.zone=?
+            WHERE p.session=? AND p.zone=? AND p.sequence>?
             ORDER BY p.sequence LIMIT ?""",
-            (session, zone, max_positions)).fetchall()
+            (session, zone, after_sequence, max_positions)).fetchall()
         markers = []
         if rows:
             markers = [r[0] for r in db.execute("""
@@ -116,6 +118,7 @@ def extract(raw_db_path, zone, session, max_positions=800):
         "session": session,
         "positions_scanned": len(rows),
         "source_last_sequence": rows[-1][0] if rows else None,
+        "source_after_sequence": after_sequence,
         "rejected": dict(sorted(reasons.items())),
         "edges": edges,
     }
@@ -234,6 +237,72 @@ def import_candidates(nav_path, doc):
         db.close()
 
 
+
+
+def manifest_sessions(path):
+    """Explicit, audited session manifest; no expensive whole-corpus ranking."""
+    path = Path(path).expanduser()
+    if path.stat().st_size > 32768:
+        raise ValueError("Session manifest exceeds 32 KiB")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if (not isinstance(data, dict) or not isinstance(data.get("sessions"), list)
+            or not 1 <= len(data["sessions"]) <= 10):
+        raise ValueError("Expected JSON object with 1 to 10 sessions")
+    sessions = data["sessions"]
+    if any(not isinstance(s, str) or not 1 <= len(s) <= 128 for s in sessions):
+        raise ValueError("Invalid session identifier in manifest")
+    if len(set(sessions)) != len(sessions):
+        raise ValueError("Duplicate session identifiers")
+    return sessions
+
+
+def extract_batch(raw_db, zone, sessions, max_positions, max_windows, write):
+    """Emit one bounded JSON line per session/window, never unbounded output."""
+    if not 1 <= max_windows <= 10:
+        raise ValueError("max_windows must be from 1 to 10")
+    if not 1 <= len(sessions) <= 10:
+        raise ValueError("At most 10 sessions per pilot")
+    for session in sessions:
+        cursor = 0
+        for _ in range(max_windows):
+            doc = extract(raw_db, zone, session, max_positions, cursor)
+            if doc["positions_scanned"] == 0:
+                break
+            write(json.dumps(doc, separators=(",", ":"), allow_nan=False) + "\n")
+            if doc["positions_scanned"] < max_positions:
+                break
+            last = doc["source_last_sequence"]
+            next_cursor = last - 1  # overlap one position at window boundary
+            if next_cursor <= cursor:
+                break
+            cursor = next_cursor
+
+
+def import_batch(nav_path, source):
+    """Consume NDJSON stream, one verified transaction per document."""
+    summary = collections.Counter()
+    sessions = set()
+    documents = 0
+    for raw in source:
+        documents += 1
+        if documents > 100:
+            raise ValueError("Exceeded 100 bounded pilot documents")
+        if len(raw) > MAX_DOCUMENT_BYTES:
+            raise ValueError("Candidate document exceeds 2 MiB")
+        doc = json.loads(raw)
+        result = import_candidates(nav_path, doc)
+        sessions.add((result["zone"], result["session"]))
+        for key in ("candidate_edges", "new_nodes", "new_edges", "new_evidence"):
+            summary[key] += result[key]
+    if documents == 0:
+        raise ValueError("No candidate documents received; nothing imported")
+    return {"documents": documents, "sessions": len(sessions),
+            "candidate_edges": summary["candidate_edges"],
+            "new_nodes": summary["new_nodes"],
+            "new_edges": summary["new_edges"],
+            "new_evidence": summary["new_evidence"],
+            "release_status": "not_built"}
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -242,17 +311,40 @@ def main(argv=None):
     ex.add_argument("--zone", required=True, type=int)
     ex.add_argument("--session", required=True)
     ex.add_argument("--max-positions", type=int, default=800)
+    ex.add_argument("--after-sequence", type=int, default=0)
     imp = sub.add_parser("import", help="Import bounded candidates to NVMe; no raw access")
     imp.add_argument("--nav-db", required=True)
+    batch_ex = sub.add_parser("extract-batch", help="Bounded historic sessions -> NDJSON")
+    batch_ex.add_argument("--raw-db", required=True)
+    batch_ex.add_argument("--zone", required=True, type=int)
+    batch_ex.add_argument("--manifest", required=True, help="JSON with explicit sessions list")
+    batch_ex.add_argument("--max-positions", type=int, default=800)
+    batch_ex.add_argument("--max-windows", type=int, default=2)
+    batch_imp = sub.add_parser("import-batch", help="NDJSON -> candidate-only NVMe graph")
+    batch_imp.add_argument("--nav-db", required=True)
     args = parser.parse_args(argv)
     if args.command == "extract":
-        print(json.dumps(extract(args.raw_db, args.zone, args.session, args.max_positions),
+        print(json.dumps(extract(args.raw_db, args.zone, args.session,
+                                 args.max_positions, args.after_sequence),
                          separators=(",", ":"), allow_nan=False))
-    else:
+    elif args.command == "import":
         data = sys.stdin.buffer.read(MAX_DOCUMENT_BYTES + 1)
         if len(data) > MAX_DOCUMENT_BYTES:
             raise ValueError("Candidate document exceeds 2 MiB")
         print(json.dumps(import_candidates(args.nav_db, json.loads(data)),
+                         indent=2, sort_keys=True))
+    elif args.command == "extract-batch":
+        extract_batch(args.raw_db, args.zone, manifest_sessions(args.manifest),
+                      args.max_positions, args.max_windows,
+                      lambda line: print(line, end="", flush=True))
+    else:
+        def bounded_lines():
+            while True:
+                line = sys.stdin.buffer.readline(MAX_DOCUMENT_BYTES + 1)
+                if not line:
+                    break
+                yield line
+        print(json.dumps(import_batch(args.nav_db, bounded_lines()),
                          indent=2, sort_keys=True))
 
 

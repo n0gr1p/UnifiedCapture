@@ -6,7 +6,11 @@ import logging
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
+
+from navigation import (NavigationQueryError, dataset as navigation_dataset,
+                        zones as navigation_zones, transitions as navigation_transitions,
+                        sessions as navigation_sessions, route_events as navigation_route_events)
 
 from storage import IngestError, MAX_BODY_BYTES, ingest, initialize, recover, stats, verify_file
 
@@ -51,8 +55,60 @@ def serve(host, port, db_path, archive_dir, token):
                 return
             if path == "/v1/stats":
                 self.respond(200, stats(db_path))
-            else:
+                return
+            # Fixed read-only telemetry queries. No SQL, file path, or mutation
+            # input is ever accepted from MCP/HTTP callers.
+            allowed = {
+                "/v1/nav/dataset": set(),
+                "/v1/nav/zones": {"limit", "offset"},
+                "/v1/nav/transitions": {"limit", "offset", "from_zone"},
+                "/v1/nav/sessions": {"limit", "offset", "zone"},
+                "/v1/nav/route-events": {"session", "after_sequence", "limit", "include_interactions"},
+            }
+            if path not in allowed:
                 self.respond(404, {"error": "not found"})
+                return
+            try:
+                params = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+                if set(params) - allowed[path] or any(len(v) != 1 for v in params.values()):
+                    raise NavigationQueryError("unsupported or repeated query parameter")
+
+                def integer(name, default=None):
+                    if name not in params:
+                        return default
+                    raw = params[name][0]
+                    if not raw.isascii() or not raw.isdecimal():
+                        raise NavigationQueryError(name + " must be an unsigned integer")
+                    return int(raw)
+
+                limit = integer("limit", 50)
+                offset = integer("offset", 0)
+                if path == "/v1/nav/dataset":
+                    result = navigation_dataset(db_path)
+                elif path == "/v1/nav/zones":
+                    result = navigation_zones(db_path, limit=limit, offset=offset)
+                elif path == "/v1/nav/transitions":
+                    result = navigation_transitions(db_path, limit=limit, offset=offset,
+                                                    from_zone=integer("from_zone"))
+                elif path == "/v1/nav/sessions":
+                    result = navigation_sessions(db_path, zone=integer("zone"),
+                                                 limit=limit, offset=offset)
+                else:
+                    if "session" not in params:
+                        raise NavigationQueryError("session is required")
+                    mode = params.get("include_interactions", ["true"])[0]
+                    if mode not in ("true", "false"):
+                        raise NavigationQueryError("include_interactions must be true or false")
+                    result = navigation_route_events(
+                        db_path, params["session"][0],
+                        after_sequence=integer("after_sequence", 0),
+                        limit=limit, include_interactions=mode == "true")
+                self.respond(200, result)
+            except NavigationQueryError as exc:
+                self.respond(400, {"error": str(exc)})
+            except Exception:
+                LOG.exception("Navigation query failure")
+                self.respond(500, {"error": "navigation query failed"})
 
         def do_POST(self):
             path = urlsplit(self.path).path

@@ -6,6 +6,7 @@ import os
 import sqlite3
 import tempfile
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 MAX_BODY_BYTES = 1024 * 1024
@@ -18,13 +19,24 @@ class IngestError(ValueError):
     pass
 
 
+@contextmanager
 def connection(db_path):
+    """Transaction and SQLite lifetime: commit/rollback and always close.
+
+    sqlite3.Connection.__exit__ handles the transaction but does NOT close
+    the connection. With frequent ingestion requests, waiting for cyclic GC
+    to collect those connections can exhaust the container's file descriptors.
+    """
     db = sqlite3.connect(db_path, timeout=30)
-    db.execute("PRAGMA busy_timeout = 30000")
-    db.execute("PRAGMA journal_mode = WAL")
-    db.execute("PRAGMA synchronous = FULL")
-    db.execute("PRAGMA foreign_keys = ON")
-    return db
+    try:
+        db.execute("PRAGMA busy_timeout = 30000")
+        db.execute("PRAGMA journal_mode = WAL")
+        db.execute("PRAGMA synchronous = FULL")
+        db.execute("PRAGMA foreign_keys = ON")
+        with db:
+            yield db
+    finally:
+        db.close()
 
 
 def initialize(db_path):
@@ -72,6 +84,11 @@ def initialize(db_path):
             ON events(zone, observed_at);
         CREATE INDEX IF NOT EXISTS idx_events_type_time
             ON events(event_type, observed_at);
+        -- Cover read-only zone summaries without joining 2.4M+ positions
+        -- to the much larger events table. Built once on upgrade.
+        CREATE INDEX IF NOT EXISTS idx_events_position_zone_session_time
+            ON events(zone, session, observed_at)
+            WHERE event_type='position' AND zone IS NOT NULL;
         CREATE TABLE IF NOT EXISTS positions (
             session TEXT NOT NULL, sequence INTEGER NOT NULL,
             zone INTEGER, x REAL, y REAL, z REAL, reason TEXT,

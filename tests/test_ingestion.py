@@ -56,6 +56,33 @@ class StoreTests(unittest.TestCase):
         ]
         self.raw = ndjson(*self.rows)
 
+    def test_connection_closes_after_success_and_error(self):
+        # sqlite3's native "with db" only commits/rolls back; it does not
+        # close the connection. Explicitly exercise both exit paths to prevent
+        # slow fd leaks under repeated ingestion HTTP requests.
+        with storage.connection(self.db) as db:
+            self.assertEqual(db.execute("SELECT 1").fetchone()[0], 1)
+        with self.assertRaises(sqlite3.ProgrammingError):
+            db.execute("SELECT 1")
+
+        with self.assertRaisesRegex(ValueError, "deliberate"):
+            with storage.connection(self.db) as failed_db:
+                raise ValueError("deliberate")
+        with self.assertRaises(sqlite3.ProgrammingError):
+            failed_db.execute("SELECT 1")
+
+    def test_connection_preserves_commit_and_rollback(self):
+        with storage.connection(self.db) as db:
+            db.execute("CREATE TABLE connection_test(value INTEGER)")
+            db.execute("INSERT INTO connection_test VALUES (1)")
+        with self.assertRaisesRegex(RuntimeError, "abort"):
+            with storage.connection(self.db) as db:
+                db.execute("INSERT INTO connection_test VALUES (2)")
+                raise RuntimeError("abort")
+        with storage.connection(self.db) as db:
+            self.assertEqual(db.execute(
+                "SELECT value FROM connection_test").fetchall(), [(1,)])
+
     def test_archive_normalized_tables_and_replay(self):
         r = storage.ingest(self.db, self.archive, self.raw, "capture.jsonl")
         self.assertEqual((r["inserted"], r["duplicates"], r["count"]), (4, 0, 4))

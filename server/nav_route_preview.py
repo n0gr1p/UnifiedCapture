@@ -161,6 +161,7 @@ def preview(nav_db, zone, start, goal, snap_radius=1.0,
             })
         waypoints = [source] + [b for _a, b, _eid, _length in route]
         return {
+            "preview_schema_version": 1,
             "zone": zone,
             "source_requested": [round(n, 2) for n in start],
             "destination_requested": [round(n, 2) for n in goal],

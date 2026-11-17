@@ -30,7 +30,7 @@
 | 0 · Preserve ingest | [NAV-00](https://github.com/n0gr1p/UnifiedCapture/issues/6) | HDD ingestion/retention measured and safe under slow verification + retries | None | Open |
 | 1 · Define product | [NAV-01](https://github.com/n0gr1p/UnifiedCapture/issues/7) | v1 derived SQLite release schema + fixture, provenance and fail-closed status | ADR | **In progress** — [draft PR #15](https://github.com/n0gr1p/UnifiedCapture/pull/15), CI passed; host NVMe bootstrap pending |
 | 2 · Mine evidence | [NAV-02](https://github.com/n0gr1p/UnifiedCapture/issues/8) | Deterministic **non-executable** Odyssey directed transport candidates; deduped trials | NAV-01 | Open |
-| 2 · Mine evidence | [NAV-03](https://github.com/n0gr1p/UnifiedCapture/issues/9) | Conservative walk candidate edges, gap/zone/elevation tests | NAV-01 | Open |
+| 2 · Mine evidence | [NAV-03](https://github.com/n0gr1p/UnifiedCapture/issues/9) | Conservative walk candidate edges, gap/zone/elevation tests | NAV-01 | **In progress** — [draft PR #16](https://github.com/n0gr1p/UnifiedCapture/pull/16), tests passed; host pilot pending |
 | 3 · Validate | [NAV-04](https://github.com/n0gr1p/UnifiedCapture/issues/10) | Review, approve, revoke and explain candidates; verified activation required | NAV-02 and NAV-03 | Open |
 | 4 · Publish | [NAV-05](https://github.com/n0gr1p/UnifiedCapture/issues/11) | Stage, validate and atomically publish compact NVMe SQLite; rollback test | NAV-01, miner fixture; NAV-04 before any executable approvals | Open |
 | 5 · Serve | [NAV-06](https://github.com/n0gr1p/UnifiedCapture/issues/12) | Secure bounded, versioned, read-only **published** graph API | NAV-05 | Open |

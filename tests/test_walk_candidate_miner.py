@@ -131,5 +131,57 @@ class WalkingCandidateTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT count(*) FROM walk_edge").fetchone()[0], 0)
 
 
+    def test_multi_window_batch_extract_and_import_deduplicates_overlap(self):
+        docs = []
+        miner.extract_batch(self.raw, 247, [self.session],
+                            max_positions=5, max_windows=5,
+                            write=docs.append)
+        self.assertGreaterEqual(len(docs), 3)
+        decoded = [json.loads(x) for x in docs]
+        self.assertTrue(all(d["zone"] == 247 for d in decoded))
+        self.assertEqual(
+            decoded[1]["source_after_sequence"],
+            decoded[0]["source_last_sequence"] - 1
+        )
+        first = miner.import_batch(self.dst, [s.encode() for s in docs])
+        self.assertEqual(first["sessions"], 1)
+        self.assertEqual(first["new_evidence"], 5)
+        self.assertEqual(first["new_edges"], 5)
+        second = miner.import_batch(self.dst, [s.encode() for s in docs])
+        self.assertEqual(second["new_evidence"], 0)
+        self.assertEqual(second["new_edges"], 0)
+        self.assertEqual(second["release_status"], "not_built")
+
+    def test_pilot_manifest_is_explicit_bounded_and_zone_checked(self):
+        manifest = Path(self.tmp.name) / "pilot.json"
+        manifest.write_text(json.dumps(
+            {"zone": 247, "sessions": [self.session]}
+        ))
+        self.assertEqual(miner.manifest_sessions(manifest, 247), [self.session])
+        with self.assertRaisesRegex(ValueError, "zone"):
+            miner.manifest_sessions(manifest, 298)
+        manifest.write_text(json.dumps(
+            {"zone": 247, "sessions": [self.session, self.session]}
+        ))
+        with self.assertRaisesRegex(ValueError, "Duplicate"):
+            miner.manifest_sessions(manifest, 247)
+        manifest.write_text(json.dumps(
+            {"zone": 247, "sessions": ["x"] * 11}
+        ))
+        with self.assertRaisesRegex(ValueError, "1 to 10"):
+            miner.manifest_sessions(manifest, 247)
+
+    def test_multi_window_bad_input_is_rejected_without_raw_write(self):
+        before = self.raw.read_bytes()
+        docs = []
+        with self.assertRaisesRegex(ValueError, "1 to 10"):
+            miner.extract_batch(self.raw, 247, [self.session] * 11,
+                                max_positions=5, max_windows=1,
+                                write=docs.append)
+        with self.assertRaisesRegex(ValueError, "No candidate documents"):
+            miner.import_batch(self.dst, [])
+        self.assertEqual(self.raw.read_bytes(), before)
+
+
 if __name__ == "__main__":
     unittest.main()

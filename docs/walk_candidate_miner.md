@@ -72,3 +72,42 @@ python3 -m unittest discover -s tests -p 'test_walk_candidate_miner.py' -v
 Next: verify a real candidate count and inspect the resulting nodes/edges
 before implementing NAV-05 staged publication, NAV-06 queries and NAV-07
 path planning. Unverified candidates are never executable.
+
+## Automated bounded multi-session pilot (recommended)
+
+Instead of manually inspecting and invoking one recording at a time, use
+the audited [zone-247 pilot manifest](pilot_zone247_sessions.json) and
+[one-command pilot runner](../scripts/mine_zone247_pilot.sh).
+The manifest names five historical sessions whose zone-247 movement totals
+were observed from the raw source. **Moving-sample count alone does not
+establish route quality.**
+
+Once the code is fetched into the isolated NavDev worktree, run:
+
+```sh
+bash ~/UnifiedCapture-NavDev/scripts/mine_zone247_pilot.sh
+```
+
+The script checks the derived database exists on the expected NVMe mount,
+validates database identity, and then handles the extraction and import
+pipeline without requiring a manual command for each session.
+It processes **at most five sessions, two windows per session, 1200
+zone-specific positions per window**, with a one-position overlap so a
+valid edge is not dropped at a window boundary. It does not enumerate
+the full raw SQLite corpus or hold a long-lived snapshot.
+
+The source-side worker (elevated only for historical reads) produces
+newline-delimited bounded JSON, one record per window. The importer
+runs without sudo as the workstation/server user and reports aggregate
+`new_nodes`, `new_edges`, `new_evidence`, and session/document counts.
+Re-running the pilot is idempotent for the same source evidence.
+
+A failed batch may leave **previous successful candidate-only documents**
+committed, which is safe to resume by re-running. This is not atomic
+publication of a navigable graph; NAV-05 will own that separate process.
+All imported edges remain `status=candidate` and the database
+remains `release_status=not_built`.
+
+**Important:** This is a bounded field test, not a background daemon,
+automated cross-zone mining, or proof of walkability. If the HDD's ingestion
+or file verification becomes slow, stop the pilot and resolve NAV-00 first.

@@ -11,11 +11,15 @@ if [[ ! -f "$nav_db" ]]; then
   exit 1
 fi
 
+# Do not replace a previous successful preview if the current route fails.
+tmp="$(mktemp "$repo/nav-data/.zone247-preview.XXXXXXXX")"
+trap 'rm -f "$tmp"' EXIT
 python3 "$repo/server/nav_route_preview.py" \
   --nav-db "$nav_db" --zone 247 \
   --from-xyz=-20.5,111.0,8.0 \
   --to-xyz=1.5,114.5,8.0 \
-  --max-distance 80 --max-stretch 2.5 > "$out"
+  --max-distance 80 --max-stretch 2.5 > "$tmp"
+mv "$tmp" "$out"
 
 python3 - "$out" <<'PY'
 import json

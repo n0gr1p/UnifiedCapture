@@ -4,6 +4,7 @@ on:
     paths:
       - 'server/**'
       - 'scripts/mine_zone247_pilot.sh'
+      - 'scripts/preview_zone247_candidate.sh'
       - 'client/**'
       - 'tests/test_*.py'
       - 'compose.yaml'
@@ -29,5 +30,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_*.py' -v
       - name: Check navigation pilot shell syntax
         run: bash -n scripts/mine_zone247_pilot.sh
+      - name: Check route preview shell syntax
+        run: bash -n scripts/preview_zone247_candidate.sh
       - name: Docker image build
         run: docker build -f server/Dockerfile -t unifiedcapture-ingest:test .

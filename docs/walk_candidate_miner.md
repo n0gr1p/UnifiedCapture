@@ -42,7 +42,7 @@ Any explicit zoning or large-jump boundary is excluded.
 - Only `position` records with one specific session and zone, ordered
   by capture sequence and linked to their event timestamps.
 - A potential walking edge requires a `moving` destination sample,
-  an immediately preceding valid position (not `new_anchor`), elapsed
+  an immediately preceding valid position (including a `new_anchor` as an origin, but never traversing into it), elapsed
   time `0 < dt <= 1.5` seconds, three-dimensional step
   `0.35 <= distance <= 6` yalms, speed `<= 12` yalms/sec and absolute
   Z difference `<= 1.5` units. Reject intervening

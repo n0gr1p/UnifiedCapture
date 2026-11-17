@@ -7,11 +7,14 @@ raw_db="${UCAP_RAW_DB:-/home/peter/bulk-storage/UnifiedCapture/server-data/captu
 nav_db="${UCAP_NAV_DB:-$repo/nav-data/navigation.sqlite3}"
 manifest="$repo/docs/pilot_zone247_sessions.json"
 
-if [[ ! -f "$raw_db" || ! -f "$nav_db" || ! -f "$manifest" ]]; then
-  echo "Missing raw DB, navigation DB, or pilot manifest; no mining performed." >&2
+# The raw HDD directory is root-protected: ordinary users cannot stat it.
+# Its existence/readability is verified by the privileged read-only extractor.
+if [[ ! -f "$nav_db" || ! -f "$manifest" ]]; then
+  echo "Missing navigation DB or pilot manifest; no mining performed." >&2
   exit 1
 fi
-if [[ "$(readlink -f "$raw_db")" == "$(readlink -f "$nav_db")" ]]; then
+# -m canonicalizes paths even when the raw directory is not searchable.
+if [[ "$(readlink -m "$raw_db")" == "$(readlink -m "$nav_db")" ]]; then
   echo "Refusing to use the raw database as a derived navigation target." >&2
   exit 1
 fi

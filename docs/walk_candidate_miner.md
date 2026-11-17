@@ -148,3 +148,34 @@ roots, reporting endpoints and lengths.
 It never modifies the source HDD or NVMe, never promotes an edge, and never
 sends movement to UC. NAV-04 must validate, NAV-05 publish, and NAV-09 opt
 in before guarded execution.
+
+
+## First offline point-to-point route preview (candidate only)
+
+The graph topology report from the real zone-247 pilot showed a substantial
+directed network and a reported candidate route from
+`(-20.5,111.0,8.0)` to `(1.5,114.5,8.0)` of roughly 41.4 yalms.
+That route is a useful *preview target*, not a verified obstacle-free walk.
+
+The [route-preview tool](../server/nav_route_preview.py) computes an explicit
+**shortest directed path** between recorded navigation nodes, after requiring
+both requested endpoints to snap to observed nodes within 1 yalm.
+It refuses paths exceeding 80 yalms or 2.5x straight-line distance for
+the preset pilot; unlike the topology report it doesn't pick maximum-distance
+detours. It returns every waypoint and per-leg evidence counts, including
+distinct recording sessions for each edge. It **does not assume reciprocal
+walking or connect nearby points unless an edge was recorded**.
+
+For the already populated NVMe, the [pilot preview runner](../scripts/preview_zone247_candidate.sh)
+prints a concise summary and saves the complete JSON report to the
+NavDev `nav-data/zone247_walk_preview.json` file (no HDD access, no sudo):
+
+```bash
+bash ~/UnifiedCapture-NavDev/scripts/preview_zone247_candidate.sh
+```
+
+The script always reports `approved_for_movement=false`.
+Six simultaneous characters can corroborate geometry but do **not** prove six
+independent traversals. Validation of route geometry and live guarded
+movement remain NAV-04/NAV-08/NAV-09 tasks. This read-only preview is not
+the NAV-07 production planner or a published route API.

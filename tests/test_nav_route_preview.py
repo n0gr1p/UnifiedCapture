@@ -42,6 +42,7 @@ class RoutePreviewTests(unittest.TestCase):
     def test_shortest_directed_path_and_evidence_are_readonly(self):
         before = self.dst.read_bytes()
         result = preview.preview(self.dst, 247, "0,0,0", "2,1,0")
+        self.assertEqual(result["preview_schema_version"], 1)
         self.assertEqual(result["distance_yalms"], 3)
         self.assertEqual(result["waypoints"], [[0,0,0],[1,0,0],[2,0,0],[2,1,0]])
         self.assertEqual(result["waypoint_count"], 4)

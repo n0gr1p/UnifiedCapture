@@ -1,0 +1,15 @@
+[Unit]
+Description=UnifiedCapture NAV-10 finite candidate backfill (user-owned)
+Documentation=https://github.com/n0gr1p/UnifiedCapture/issues/14
+ConditionPathExists=/home/peter/UnifiedCapture/compose.yaml
+ConditionPathExists=/home/peter/UnifiedCapture-NavDev/scripts/nav_backfill_bounded.py
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/peter/UnifiedCapture
+ExecStart=/usr/bin/python3 /home/peter/UnifiedCapture-NavDev/scripts/nav_backfill_bounded.py --apply --max-events 2000 --max-batches 5 --pause-seconds 5
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=180s
+StandardOutput=journal
+StandardError=journal

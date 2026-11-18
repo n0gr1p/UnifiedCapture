@@ -103,6 +103,10 @@ Operator command returned `Linger=no` and `systemctl --user is-system-running` â
 
 Operator updated NavDev to `3b06eba`, installed the NAV-10 user service and timer definitions under `~/.config/systemd/user`, ran `systemctl --user daemon-reload` and confirmed `service=static`, **`timer=disabled`**. The timer's `PRESET enabled` is only the default preset, **not** its current enabled state. Neither unit was started; no recurring backfill and no change to `Linger=no`. Next: verify parsed unit definitions and inactive/disabled states read-only, then request explicit opt-in for activation and any linger change. [NAV-10 #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
 
+### NAV-10 installed-unit verification PASS â€” 2026-11-18
+
+User ran `systemd-analyze --user verify` with no errors; `systemctl --user show` confirms **timer loaded/inactive/disabled**, **service loaded/inactive/static**. Definitions installed but neither active; `Linger=no` unchanged. Next optional operator opt-in: `systemctl --user enable --now unifiedcapture-nav-backfill.timer`, inspect scheduled next run, monitor actual journal and ingest health. First timer trigger ~5m; repeat 15m after the service completes, capped 5x2000 per invocation. Do not call timer operational until enabled and live run verified. [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
+
 ### Current gaps: do not report these as completed
 
 - **No automated full-history backfill or continuous new-capture mining**, durable source watermarks/checkpoints, scheduling, I/O load verification or graph release promotion; current miner requires manually selected bounded sessions.

@@ -51,6 +51,10 @@ Independent read-only verification of the 2-batch split-worker pilot returned **
 
 A UID-10001 container-reader -> unprivileged host-consumer **2,000-event dry run succeeded** from checkpoint 400: 463 positions, 401 candidate pairs, 3 boundaries, 5 documents, 0 invalid positions, proposed end rowid 2400; **real time 0.421 seconds** (~4,750 events/sec for that short read-only sample). **No writes; committed checkpoint remains 400**. Next: time one 2,000-event **actual NVMe candidate import** (same bounded split workflow, only remove `--dry-run` from consumer); then introduce manual I/O-budgeted backfill loop. [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14) contains exact output. No schedule and no claim of full backfill.
 
+### NAV-10 2,000-event live write benchmark — 2026-11-18
+
+Real split-pipeline import from rowids **401–2400** passed: 463 positions, 401 candidate pairs, **370 new nodes / 391 edges / 400 evidence refs** (total NAV-10 additions across three runs: 525/544/553). Wall-clock `6.943s` included a `sudo` password prompt and is not a clean import throughput measurement. Reported committed cursor now 2400; independent readback pending. Next implement a bounded, pause-configurable manual backfill runner with no background service. See [issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
+
 ### Current gaps: do not report these as completed
 
 - **No automated full-history backfill or continuous new-capture mining**, durable source watermarks/checkpoints, scheduling, I/O load verification or graph release promotion; current miner requires manually selected bounded sessions.

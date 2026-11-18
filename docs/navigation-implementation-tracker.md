@@ -115,6 +115,10 @@ User explicitly enabled `unifiedcapture-nav-backfill.timer`; systemd created the
 
 At **11:20:31 MST**, `unifiedcapture-nav-backfill.timer` triggered the first actual user-level backfill service. Systemd journal shows successful finite completion **11:20:53**, five 2k-event batches, 10k total, **0 invalid positions**, reported cursor **18,400→28,400**, **450 new nodes / 660 directed candidate edges / 883 evidence refs**, elapsed 22.586s including four 5s pauses, CPU time 1.287s. Cumulative NAV-10 live inserts now **2,956 nodes / 3,704 edges / 4,500 evidence**. The service success is confirmed; independently re-read cursor, ingestion health and next timer fire before declaring continuous operation. Timer remains enabled, but **`Linger=no`**—no reliable logout/reboot continuation until separately approved. Source historical backlog still ~31m rowids and late-session repair remains open. [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
 
+### NAV-10 first scheduled run independently verified — 2026-11-18
+
+Operator independently read the saved worker cursor **28,400**, verified ingestion `/health` returned `{"status":"ok","schema":1}`, and observed the next systemd user timer firing scheduled for **Wed 2026-11-18 11:35:53 MST** after first successful service run at 11:20:31–11:20:53. Timed backfill is now **enabled, one actual run successful, and next run scheduled**, not yet reboot-persistent because latest linger state is `Linger=no`. Next decision: operator may separately run `sudo loginctl enable-linger peter` and read back `Linger=yes` to permit background continuation after logout and reboot. No claim of full historical mining or out-of-order repair. [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
+
 ### Current gaps: do not report these as completed
 
 - **No automated full-history backfill or continuous new-capture mining**, durable source watermarks/checkpoints, scheduling, I/O load verification or graph release promotion; current miner requires manually selected bounded sessions.

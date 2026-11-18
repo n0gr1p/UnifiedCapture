@@ -11,6 +11,7 @@ No cron, service changes, Docker restart, raw writes or edge approvals.
 import argparse
 import fcntl
 import json
+import math
 import os
 import subprocess
 import sys
@@ -169,7 +170,7 @@ def main(argv=None):
         parser.error("--max-events must be in 1..2000")
     if not 1 <= args.max_batches <= MAX_BATCHES:
         parser.error("--max-batches must be in 1..10")
-    if not 1 <= args.pause_seconds <= 60:
+    if not math.isfinite(args.pause_seconds) or not 1 <= args.pause_seconds <= 60:
         parser.error("--pause-seconds must be between 1 and 60")
     execute(args)
 

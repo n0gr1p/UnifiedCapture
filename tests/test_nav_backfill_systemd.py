@@ -11,7 +11,7 @@ TIMER = "unifiedcapture-nav-backfill.timer"
 
 
 def read_unit(name):
-    cfg = configparser.ConfigParser(interpolation=None)
+    cfg = configparser.ConfigParser(interpolation=None, strict=False)
     loaded = cfg.read(UNITS / name, encoding="utf-8")
     if not loaded:
         raise AssertionError(f"Missing systemd unit: {name}")

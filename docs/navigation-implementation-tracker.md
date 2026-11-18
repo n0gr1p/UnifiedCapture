@@ -131,6 +131,10 @@ User inspected installed timer: first start 5m, subsequent 15m after completion;
 
 Operator fetched PR #18 commit `c3483bc`, installed the updated **timer only**, performed `daemon-reload` and restarted the user timer. Live systemd listing showed next **11:34:31 MST** and last **11:33:31 MST** (17ms before listing), consistent with the new one-minute cadence. Last trigger may have launched a service concurrently with the restart; **check current service state and journal** before declaring an additional successful scheduled import. Budget remains at most 5x2k rows/run with 5s pauses; timer enabled and `Linger=yes`. No changes to raw ingest or stored graph cursor. [NAV-10 #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
 
+### NAV-10 faster timer verified through two live runs — 2026-11-18
+
+After accelerating the user timer, systemd journal shows **two successful timer-triggered 5x2k imports**: **11:33:31–11:33:54 MST**, cursor 28,400→38,400, **467 nodes / 580 edges / 684 evidence**; **11:34:33–11:34:56 MST**, cursor 38,400→48,400, **520 nodes / 693 edges / 925 evidence**. Both had 0 invalid positions; service `Result=success`, `ActiveState=inactive` after the latter, and ingestion `/health` returned ok. Combined +20k events, +987 nodes, +1,273 edges, +1,609 evidence. Total reported NAV-10 inserts to date: **3,943 nodes / 4,977 edges / 6,109 evidence**; last runner checkpoint **48,400** (separate readback pending). Existing timer enabled and `Linger=yes`. Still needs ongoing error/ingest-latency monitoring and targeted out-of-order session repair; full 31M-history not done. [NAV-10 #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
+
 ### Current gaps: do not report these as completed
 
 - **No automated full-history backfill or continuous new-capture mining**, durable source watermarks/checkpoints, scheduling, I/O load verification or graph release promotion; current miner requires manually selected bounded sessions.

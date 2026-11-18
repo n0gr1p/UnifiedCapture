@@ -91,4 +91,16 @@ Without --apply, it executes ONLY ONE dry-run source window, regardless of max-b
 python3 ~/UnifiedCapture-NavDev/scripts/nav_backfill_bounded.py --apply --max-events 2000 --max-batches 3 --pause-seconds 5
 ~~~
 
-The reader uses sudo docker compose exec -T ingest as UID 10001; sudo may prompt for user authentication. The writer remains non-root. If a late archival chunk appears out of order, the importer fails closed with OUT_OF_ORDER_SESSION_SEQUENCE until targeted repair exists. This script is an opt-in finite budgeted run, not a continuously scheduled service. Benchmark ingestion health and HDD I/O before automating recurring executions.
+As of branch commit e6285be, the bounded runner uses `docker compose exec -T ingest` **without sudo**, relying on the existing `peter` membership in Docker's socket-owning `docker` group (root-equivalent authorization already present on this host). No socket permissions or group memberships should be changed. The writer remains non-root. Confirm this sudo-free change in a field dry run before configuring a timer. If a late archival chunk appears out of order, the importer fails closed with OUT_OF_ORDER_SESSION_SEQUENCE until targeted repair exists. This script is an opt-in finite budgeted run, not a continuously scheduled service. Benchmark ingestion health and HDD I/O before automating recurring executions.
+
+## Docker socket authorization checkpoint (2026-11-18)
+
+The operator's `id -nG` showed `peter` already belongs to `docker`, and `stat /var/run/docker.sock` showed `root:docker srw-rw----`. The runner previously used `sudo docker compose exec` and now invokes Docker **directly** as `peter`; only Docker's existing service remains privileged, while the process inside the ingestion container stays at UID 10001 and the host importer is never root. Docker socket access is already root-equivalent: never add users or expand socket ACLs for this feature.
+
+After updating `~/UnifiedCapture-NavDev` to the latest PR #18 branch head, run a **dry-run only** from `~/UnifiedCapture`:
+
+~~~sh
+python3 ~/UnifiedCapture-NavDev/scripts/nav_backfill_bounded.py --max-events 2000 --max-batches 3
+~~~
+
+There should be **no sudo prompt** and exactly one `dry_run:true` source window, starting at committed cursor `18400` after the previously successful 5x2k import. Nothing scheduled yet; verify before proposing a user-owned systemd timer.

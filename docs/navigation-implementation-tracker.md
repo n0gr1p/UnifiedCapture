@@ -31,6 +31,10 @@
 
 A **200-event read-only host dry run succeeded** against the real HDD capture SQLite (via `sudo`): 149 positions, 106 candidate edges, 2 observed boundaries, 2 candidate documents, no writes. Exact output and safe next checkpoint are recorded in [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14). Next check is Unix raw-read/NVMe-write permissions. **Do not use sudo for a mutating import** until privilege separation/file ownership is verified; no live import or schedule has yet run.
 
+### NAV-10 permissions follow-up — 2026-11-18
+
+A live host-user read-only SQLite open failed because the ingest directory is owned by UID 10001 and temporary WAL/SHM sidecars may vanish. **Draft PR #18 now adds a split reader/writer implementation**: read bounded raw events *inside the existing ingest container as UID 10001*, then pipe JSON to an unprivileged host consumer that updates Peter-owned NVMe graph/checkpoint. Synthetic split-worker tests passed; no live split-run yet. The **immediate one-step checkpoint** is a read-only container Python test documented in [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14). Do not give Peter write permission to raw ingestion, run the graph writer as root, or assume the worker has been scheduled.
+
 ### Current gaps: do not report these as completed
 
 - **No automated full-history backfill or continuous new-capture mining**, durable source watermarks/checkpoints, scheduling, I/O load verification or graph release promotion; current miner requires manually selected bounded sessions.

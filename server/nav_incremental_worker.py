@@ -14,6 +14,7 @@ import collections
 import fcntl
 import json
 import math
+import sys
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -24,6 +25,7 @@ import walk_candidate_miner as miner
 
 MAX_EVENTS = 2000
 MAX_BATCHES = 25
+MAX_STREAM_BYTES = 4 * 1024 * 1024
 ALLOWED_PREVIOUS = frozenset(("anchor", "new_anchor", "moving", "heartbeat"))
 STATE_SQL = """
 CREATE TABLE IF NOT EXISTS mining_cursor (
@@ -53,12 +55,21 @@ def identity(path):
     return p, json.dumps([str(p), stat.st_dev, stat.st_ino], separators=(",", ":"))
 
 
-def validate_paths(raw_db, nav_db, state_db):
+def validate_metadata_paths(raw_db, nav_db, state_db):
+    """Check file identities without opening the protected raw database."""
     raw, raw_id = identity(raw_db)
     nav, nav_id = identity(nav_db)
     state = Path(state_db).expanduser().resolve()
     if state == raw or state == nav or raw == nav:
         raise ValueError("Source, derived and worker-state paths must differ")
+    info = derived_navigation_db.inspect(nav)
+    if info["release_status"] != "not_built":
+        raise ValueError("Cannot mine into a staged/published navigation release")
+    return raw, raw_id, nav, nav_id, state
+
+
+def validate_paths(raw_db, nav_db, state_db):
+    raw, raw_id, nav, nav_id, state = validate_metadata_paths(raw_db, nav_db, state_db)
     # Prevent accidentally treating unrelated raw SQLite as a capture source.
     with sqlite3.connect(raw.as_uri() + "?mode=ro", uri=True, timeout=2) as db:
         db.execute("PRAGMA query_only=ON")
@@ -67,9 +78,6 @@ def validate_paths(raw_db, nav_db, state_db):
         )}
         if tables != {"events", "positions"}:
             raise ValueError("Raw SQLite missing UnifiedCapture event/position tables")
-    info = derived_navigation_db.inspect(nav)
-    if info["release_status"] != "not_built":
-        raise ValueError("Cannot mine into a staged/published navigation release")
     return raw, raw_id, nav, nav_id, state
 
 
@@ -278,6 +286,82 @@ def run_once(raw_db, nav_db, state_db, max_events=1000, dry_run=False):
         }
 
 
+def source_cursor(raw_db, nav_db, state_db):
+    """Get the last committed cursor without needing raw SQLite open access."""
+    _raw, raw_id, _nav, nav_id, state = validate_metadata_paths(
+        raw_db, nav_db, state_db)
+    cursor, _last = load_state(state, raw_id, nav_id)
+    return cursor
+
+
+def consume_stream(raw_db, nav_db, state_db, stream, dry_run=False):
+    """Consume a single bounded, validated privileged-reader window as peter.
+
+    The source reader only emits JSON and never writes NVMe state; this
+    process never opens the protected raw SQLite database.
+    """
+    _raw, raw_id, nav, nav_id, state = validate_metadata_paths(
+        raw_db, nav_db, state_db)
+    if len(stream) > MAX_STREAM_BYTES:
+        raise ValueError("Reader output exceeds bounded stream limit")
+    try:
+        doc = json.loads(stream)
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise ValueError("Invalid read-only reader JSON") from exc
+    if (not isinstance(doc, dict)
+            or doc.get("source_schema") != "UnifiedCapture/events"
+            or type(doc.get("stream_version")) is not int
+            or doc["stream_version"] != 1
+            or type(doc.get("after_rowid")) is not int
+            or doc["after_rowid"] < 0
+            or type(doc.get("last_rowid")) is not int
+            or not isinstance(doc.get("rows"), list)
+            or len(doc["rows"]) > MAX_EVENTS):
+        raise ValueError("Invalid source event window envelope")
+    rows = doc["rows"]
+    previous_id = doc["after_rowid"]
+    for row in rows:
+        if not isinstance(row, list) or len(row) != 10:
+            raise ValueError("Malformed source event row")
+        if type(row[0]) is not int or row[0] <= previous_id:
+            raise ValueError("Non-increasing source rowid")
+        previous_id = row[0]
+    if doc["last_rowid"] != previous_id:
+        raise ValueError("Source rowid cursor mismatch")
+    with single_worker(state, dry_run):
+        committed, anchors = load_state(state, raw_id, nav_id)
+        if committed != doc["after_rowid"]:
+            raise ValueError("STALE_SOURCE_CURSOR: redo source read with current cursor")
+        if not rows:
+            return {"processed_events": 0, "after_rowid": committed,
+                    "last_rowid": committed, "dry_run": dry_run,
+                    "documents": 0, "new_nodes": 0, "new_edges": 0,
+                    "new_evidence": 0}
+        latest, docs, next_anchors, counters = process_rows(rows, anchors)
+        stats = collections.Counter()
+        if not dry_run:
+            for (_zone, _session), candidate in sorted(docs.items()):
+                result = miner.import_candidates(nav, candidate)
+                stats["documents"] += 1
+                for key in ("new_nodes", "new_edges", "new_evidence"):
+                    stats[key] += result[key]
+            store_state(state, raw_id, nav_id, latest, next_anchors)
+        return {
+            "processed_events": counters["events"],
+            "positions_seen": counters["positions"],
+            "candidate_walk_edges": counters["observed_walk_candidate"],
+            "boundaries_seen": counters["boundary_markers"],
+            "invalid_positions": counters["invalid_positions"],
+            "documents": len(docs),
+            "after_rowid": committed,
+            "last_rowid": latest,
+            "dry_run": dry_run,
+            "new_nodes": stats["new_nodes"],
+            "new_edges": stats["new_edges"],
+            "new_evidence": stats["new_evidence"],
+        }
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--raw-db", required=True, help="HDD capture SQLite (read only)")
@@ -287,7 +371,21 @@ def main(argv=None):
     p.add_argument("--max-batches", type=int, default=1)
     p.add_argument("--pause-ms", type=int, default=100)
     p.add_argument("--dry-run", action="store_true")
+    action = p.add_mutually_exclusive_group()
+    action.add_argument("--cursor-only", action="store_true",
+                        help="Print committed raw-event rowid; no raw database open")
+    action.add_argument("--consume-stdin", action="store_true",
+                        help="Import JSON from UID-isolated read-only source reader")
     args = p.parse_args(argv)
+    if args.cursor_only:
+        print(source_cursor(args.raw_db, args.nav_db, args.state_db))
+        return
+    if args.consume_stdin:
+        source = sys.stdin.buffer.read(MAX_STREAM_BYTES + 1)
+        result = consume_stream(args.raw_db, args.nav_db, args.state_db,
+                                source, args.dry_run)
+        print(json.dumps(result, separators=(",", ":"), allow_nan=False))
+        return
     if not 1 <= args.max_batches <= MAX_BATCHES:
         p.error("--max-batches must be from 1 to 25")
     if not 0 <= args.pause_ms <= 30000:

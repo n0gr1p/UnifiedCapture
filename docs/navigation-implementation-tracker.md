@@ -75,6 +75,10 @@ Operator independently confirmed persisted **cursor 8400** and `/health` returne
 
 After successful 3-batch NAV-10 run (cursor **8400**; `/health` status ok), single `docker stats --no-stream` read: ingest CPU **0.01%**, memory **3.871GiB/46.91GiB**, cumulative block I/O **8.83GB read / 234GB written**, PID count 1. **This is not a live I/O rate or proof of zero backfill impact.** Next test finite 5 x 2000-event applied windows with pauses and check service health, checkpoint and stats. See [NAV-10 #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
 
+### NAV-10 supervised 10k bounded run and ingest health — 2026-11-18
+
+The operator's 5 x 2,000-event supervised **apply** run succeeded: per-batch cursor **8400→10400→12400→14400→16400→18400**, zero invalid positions, **1,039 new nodes / 1,421 directed candidate edges / 1,885 evidence records**; **22.94 seconds** including four 5-second pauses. Independent persisted cursor read returned **18400**. Total new inserts across all NAV-10 imports: **2,506 nodes / 3,044 edges / 3,617 evidence**. Post-run ingestion `/health` status was ok, latency **0.000805s**; Docker snapshot CPU 1.38%, memory 3.871GiB, cumulative read/write block I/O 8.84GB/234GB. This is **not a simultaneous-load benchmark**, only post-run availability. Next measure max raw event rowid via one read-only container query to estimate backlog, then design safe noninteractive scheduling. Full-history backfill and late-chunk repair remain open. [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
+
 ### Current gaps: do not report these as completed
 
 - **No automated full-history backfill or continuous new-capture mining**, durable source watermarks/checkpoints, scheduling, I/O load verification or graph release promotion; current miner requires manually selected bounded sessions.

@@ -83,6 +83,10 @@ The operator's 5 x 2,000-event supervised **apply** run succeeded: per-batch cur
 
 Live UID-10001 read-only query returned **MAX(events.rowid)=31,153,494**; independently verified miner cursor **18,400**. Approximate unprocessed rowid span **31,135,094** (~15,568 x 2k-event windows; gaps/deletes and ongoing ingestion may change actual count). Current supervised throughput is not evidence of sustained performance across this backlog. Next inspect host Docker authorization (no permissions changes) before designing **noninteractive, resource-budgeted scheduling**. No persistent timer installed; avoid adding peter to root-equivalent Docker group or blanket passwordless sudo. Late out-of-order history repair remains open. [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
 
+### NAV-10 existing Docker socket authorization — 2026-11-18
+
+The operator's `id -nG` includes **docker** and Docker socket is `root:docker srw-rw----`. Existing `peter` identity should be able to invoke Docker without `sudo` (not yet directly tested); Docker group is **root-equivalent**, so no new privileges should be added. Next verify `docker compose exec -T ingest ...` unprivileged, remove the runner's unnecessary sudo, add CI tests, then create an opt-in user-owned timer that applies bounded batches. No timer is installed yet. See [NAV-10 #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
+
 ### Current gaps: do not report these as completed
 
 - **No automated full-history backfill or continuous new-capture mining**, durable source watermarks/checkpoints, scheduling, I/O load verification or graph release promotion; current miner requires manually selected bounded sessions.

@@ -29,7 +29,7 @@ class NavWorkerTests(unittest.TestCase):
                     observed_at REAL, PRIMARY KEY(session,sequence));
                 CREATE TABLE positions(
                     session TEXT NOT NULL, sequence INTEGER NOT NULL,
-                    x REAL, y REAL, z REAL, reason TEXT,
+                    zone INTEGER, x REAL, y REAL, z REAL, reason TEXT,
                     PRIMARY KEY(session,sequence));
             """)
         derived.initialize(self.nav)
@@ -45,8 +45,8 @@ class NavWorkerTests(unittest.TestCase):
             if event == "position":
                 assert xyz is not None
                 db.execute(
-                    "INSERT INTO positions VALUES (?,?,?,?,?,?)",
-                    (session, seq, *xyz, reason))
+                    "INSERT INTO positions VALUES (?,?,?,?,?,?,?)",
+                    (session, seq, zone, *xyz, reason))
 
     def run_once(self, max_events=100, dry_run=False):
         return worker.run_once(

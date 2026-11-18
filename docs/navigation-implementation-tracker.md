@@ -99,6 +99,10 @@ Operator updated NavDev to `42b3a42` and verified one **sudo-free read-only batc
 
 Operator command returned `Linger=no` and `systemctl --user is-system-running` → `running`. User manager works during active session; recurring user timer cannot be relied on after logout/reboot unless lingering is explicitly enabled. No linger, timer or service changes made. Next fetch PR #18, install the two systemd **unit definitions only**, `daemon-reload`, then verify both units remain disabled. [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
 
+### NAV-10 user systemd unit installation disabled — 2026-11-18
+
+Operator updated NavDev to `3b06eba`, installed the NAV-10 user service and timer definitions under `~/.config/systemd/user`, ran `systemctl --user daemon-reload` and confirmed `service=static`, **`timer=disabled`**. The timer's `PRESET enabled` is only the default preset, **not** its current enabled state. Neither unit was started; no recurring backfill and no change to `Linger=no`. Next: verify parsed unit definitions and inactive/disabled states read-only, then request explicit opt-in for activation and any linger change. [NAV-10 #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
+
 ### Current gaps: do not report these as completed
 
 - **No automated full-history backfill or continuous new-capture mining**, durable source watermarks/checkpoints, scheduling, I/O load verification or graph release promotion; current miner requires manually selected bounded sessions.

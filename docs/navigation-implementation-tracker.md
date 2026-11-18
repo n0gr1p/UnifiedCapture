@@ -79,6 +79,10 @@ After successful 3-batch NAV-10 run (cursor **8400**; `/health` status ok), sing
 
 The operator's 5 x 2,000-event supervised **apply** run succeeded: per-batch cursor **8400→10400→12400→14400→16400→18400**, zero invalid positions, **1,039 new nodes / 1,421 directed candidate edges / 1,885 evidence records**; **22.94 seconds** including four 5-second pauses. Independent persisted cursor read returned **18400**. Total new inserts across all NAV-10 imports: **2,506 nodes / 3,044 edges / 3,617 evidence**. Post-run ingestion `/health` status was ok, latency **0.000805s**; Docker snapshot CPU 1.38%, memory 3.871GiB, cumulative read/write block I/O 8.84GB/234GB. This is **not a simultaneous-load benchmark**, only post-run availability. Next measure max raw event rowid via one read-only container query to estimate backlog, then design safe noninteractive scheduling. Full-history backfill and late-chunk repair remain open. [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
 
+### NAV-10 raw event backlog measured — 2026-11-18
+
+Live UID-10001 read-only query returned **MAX(events.rowid)=31,153,494**; independently verified miner cursor **18,400**. Approximate unprocessed rowid span **31,135,094** (~15,568 x 2k-event windows; gaps/deletes and ongoing ingestion may change actual count). Current supervised throughput is not evidence of sustained performance across this backlog. Next inspect host Docker authorization (no permissions changes) before designing **noninteractive, resource-budgeted scheduling**. No persistent timer installed; avoid adding peter to root-equivalent Docker group or blanket passwordless sudo. Late out-of-order history repair remains open. [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
+
 ### Current gaps: do not report these as completed
 
 - **No automated full-history backfill or continuous new-capture mining**, durable source watermarks/checkpoints, scheduling, I/O load verification or graph release promotion; current miner requires manually selected bounded sessions.

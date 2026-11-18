@@ -70,3 +70,25 @@ sudo docker compose exec -T ingest python - --db /data/capture.sqlite3 --after-r
 The reader only SELECTs from SQLite in the running ingest container and emits a bounded JSON window; the consumer checks the schema, rowid monotonicity and committed cursor. The dry-run makes no checkpoint or graph writes. After further checks, removing --dry-run from ONLY the consumer enables peter-owned NVMe graph/checkpoint writes. NEVER run consumer under sudo.
 
 This is a manual pipeline, not a deployed scheduler. Verify user-visible output and ingest performance first. Late/out-of-order archived chunks currently fail closed with OUT_OF_ORDER_SESSION_SEQUENCE; targeted reconciliation remains unbuilt.
+
+## 2026-11-18 live validation and bounded backfill runner
+
+**Verified on uuserver:** The UID-isolated container reader and unprivileged host writer successfully imported two 200-event windows and one 2,000-event window. Across these three imports: 525 new graph nodes, 544 directed candidate edges, 553 evidence references. The latest import reported after_rowid=400,last_rowid=2400, with 370 new nodes, 391 edges and 400 evidence records. Its measured 6.943 seconds INCLUDED a sudo password prompt and is not pure graph throughput. The 2400 cursor is not yet independently read back.
+
+**New manual bounded runner:** scripts/nav_backfill_bounded.py repeatedly invokes exactly the same split reader and writer processes, as the ordinary host user, from the existing Compose project directory. It re-reads and independently verifies the committed checkpoint each time. Each read is capped at 2,000 events and 4 MiB of JSON; one invocation is capped at 10 batches with a configurable 1-60 second pause. It uses a user-owned cooperative lock, stops at source tail, and fails closed on any reader/importer error, malformed output, stale cursor or checkpoint mismatch. No cron/systemd, Docker restart, movement approval or published release is installed.
+
+**FIRST, READ-ONLY checkpoint** after fetching the latest PR branch into ~/UnifiedCapture-NavDev, from the running Compose project directory ~/UnifiedCapture:
+
+~~~sh
+python3 ~/UnifiedCapture-NavDev/scripts/nav_backfill_bounded.py --max-events 2000 --max-batches 3
+~~~
+
+Without --apply, it executes ONLY ONE dry-run source window, regardless of max-batches, and writes no graph or checkpoint state. Expected initial cursor 2400 if the prior live import persisted. It prints JSON per batch and a final summary.
+
+**Separate next checkpoint**, ONLY after operator review: explicitly opt in to at most three write batches, pausing five seconds:
+
+~~~sh
+python3 ~/UnifiedCapture-NavDev/scripts/nav_backfill_bounded.py --apply --max-events 2000 --max-batches 3 --pause-seconds 5
+~~~
+
+The reader uses sudo docker compose exec -T ingest as UID 10001; sudo may prompt for user authentication. The writer remains non-root. If a late archival chunk appears out of order, the importer fails closed with OUT_OF_ORDER_SESSION_SEQUENCE until targeted repair exists. This script is an opt-in finite budgeted run, not a continuously scheduled service. Benchmark ingestion health and HDD I/O before automating recurring executions.

@@ -67,6 +67,10 @@ At head `460b9e8`, the user successfully ran `scripts/nav_backfill_bounded.py --
 
 Operator ran `scripts/nav_backfill_bounded.py --apply --max-events 2000 --max-batches 3 --pause-seconds 5` at branch head `460b9e8`; **all three 2k-event batches succeeded**, with per-batch checkpoint readbacks **2400→4400→6400→8400**, 0 invalid positions and **942 new nodes / 1,079 directed candidate edges / 1,179 evidence references** in the finite run, taking 11.809 seconds including two 5-second pauses. Across all NAV-10 persistent live imports to date: **1,467 new nodes / 1,623 new edges / 1,732 new evidence**. Next independently verify cursor 8400 and capture service health, then benchmark ingest impact before any recurring schedule. Full historical backfill and late-session repair **remain open**. [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14) has exact per-window results.
 
+### NAV-10 independent checkpoint and ingest-health verified — 2026-11-18
+
+Operator independently confirmed persisted **cursor 8400** and `/health` returned `{"status":"ok","schema":1}` from `192.168.96.45:8787` after the finite three-batch backfill. Basic service availability is verified; impact on ingest latency, queueing, and HDD I/O **not yet measured**. Next take read-only process usage baseline and evaluate a finite run under observation; full historical backfill, late-chunk correction, and scheduled execution remain open. See [NAV-10 #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
+
 ### Current gaps: do not report these as completed
 
 - **No automated full-history backfill or continuous new-capture mining**, durable source watermarks/checkpoints, scheduling, I/O load verification or graph release promotion; current miner requires manually selected bounded sessions.

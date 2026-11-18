@@ -41,8 +41,8 @@ class NavBackfillSystemdTests(unittest.TestCase):
 
     def test_timer_is_opt_in_bounded_and_nonpersistent(self):
         cfg = read_unit(TIMER)
-        self.assertEqual(cfg["Timer"]["OnActiveSec"], "5min")
-        self.assertEqual(cfg["Timer"]["OnUnitInactiveSec"], "15min")
+        self.assertEqual(cfg["Timer"]["OnActiveSec"], "1min")
+        self.assertEqual(cfg["Timer"]["OnUnitInactiveSec"], "1min")
         self.assertEqual(cfg["Timer"]["Unit"], SERVICE)
         self.assertEqual(cfg["Timer"]["Persistent"], "false")
         self.assertEqual(cfg["Install"]["WantedBy"], "timers.target")

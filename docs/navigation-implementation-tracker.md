@@ -39,6 +39,10 @@ A live host-user read-only SQLite open failed because the ingest directory is ow
 
 **SUCCESS:** split UID 10001 read-only container reader -> unprivileged `peter` importer processed first **200** raw event rowids (149 positions, 106 detected walking candidate pairs, 2 boundaries), inserted **106 new nodes / 105 directed edges / 105 evidence records** into NVMe, and reported checkpoint advancement **0 -> 200**. No Docker restart or raw HDD mutation was requested. See [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14) for exact JSON. **Next checkpoint:** read back persisted cursor and verify `peter` ownership of state and graph before processing rowids 201+. Production scheduling, all-history processing and late-session correction remain open.
 
+### NAV-10 consecutive live incremental batch PASS — 2026-11-18
+
+**Second UID-split live import succeeded:** processed event rowids **201–400** (`after_rowid=200`, `last_rowid=400`), detected 48 candidate walk pairs, inserted 49 additional nodes, 48 directed edges, and 48 evidence records as Peter-owned NVMe writes. Combined first two imports added **155 nodes / 153 edges / 153 evidence**. Read-only container ingestion remained separate; no restart requested. [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14) has exact JSON output. Next verify persisted cursor / graph read-only, then benchmark safe historical throughput and address late-arriving sessions. Do not claim complete 43 GB backfill or production scheduling.
+
 ### Current gaps: do not report these as completed
 
 - **No automated full-history backfill or continuous new-capture mining**, durable source watermarks/checkpoints, scheduling, I/O load verification or graph release promotion; current miner requires manually selected bounded sessions.

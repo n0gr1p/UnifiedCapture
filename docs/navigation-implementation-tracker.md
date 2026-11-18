@@ -87,6 +87,10 @@ Live UID-10001 read-only query returned **MAX(events.rowid)=31,153,494**; indepe
 
 The operator's `id -nG` includes **docker** and Docker socket is `root:docker srw-rw----`. Existing `peter` identity should be able to invoke Docker without `sudo` (not yet directly tested); Docker group is **root-equivalent**, so no new privileges should be added. Next verify `docker compose exec -T ingest ...` unprivileged, remove the runner's unnecessary sudo, add CI tests, then create an opt-in user-owned timer that applies bounded batches. No timer is installed yet. See [NAV-10 #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
 
+### NAV-10 sudo-free reader implementation + CI — 2026-11-18
+
+PR #18 code/test commit `e6285be` updated `scripts/nav_backfill_bounded.py` to call **`docker compose exec -T ingest` without sudo**, using existing `peter` docker-group/root-equivalent socket authorization; tests adjusted, CI green ([run 44366042237](https://github.com/n0gr1p/UnifiedCapture/actions/runs/44366042237)). Docs head `42b3a42`. Next refresh NavDev and run **one dry-run window** from persisted cursor 18,400 with no sudo prompt, then prepare an **opt-in** finite-rate user systemd timer. No timer or continuous backfill installed yet. [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
+
 ### Current gaps: do not report these as completed
 
 - **No automated full-history backfill or continuous new-capture mining**, durable source watermarks/checkpoints, scheduling, I/O load verification or graph release promotion; current miner requires manually selected bounded sessions.

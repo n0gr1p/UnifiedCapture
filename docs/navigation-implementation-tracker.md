@@ -95,6 +95,10 @@ PR #18 code/test commit `e6285be` updated `scripts/nav_backfill_bounded.py` to c
 
 Operator updated NavDev to `42b3a42` and verified one **sudo-free read-only batch** from checkpoint 18,400 toward rowid 20,400: 2,000 events, 117 positions, 52 candidate pairs, 0 invalid positions, **0 writes**, 0.409s and no sudo prompt. PR #18 now includes user-systemd `.service`/`.timer` files plus parser tests and [deployment guide](https://github.com/n0gr1p/UnifiedCapture/blob/feature/nav-10-incremental-worker-20261118/docs/nav-10-user-timer.md), latest head `3b06eba`, CI green. Timer **not installed/enabled**; conservative 5x2k windows per invocation, 5s pauses, first trigger 5m, subsequent 15m after completion, nice/idle I/O on host writer, no missed-run catch-up. Next read-only check `loginctl show-user peter -p Linger && systemctl --user is-system-running` before any unit installation. No live latency guarantee, 31m backlog and late-chunk repair still open. [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
 
+### NAV-10 systemd user-manager / lingering check — 2026-11-18
+
+Operator command returned `Linger=no` and `systemctl --user is-system-running` → `running`. User manager works during active session; recurring user timer cannot be relied on after logout/reboot unless lingering is explicitly enabled. No linger, timer or service changes made. Next fetch PR #18, install the two systemd **unit definitions only**, `daemon-reload`, then verify both units remain disabled. [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
+
 ### Current gaps: do not report these as completed
 
 - **No automated full-history backfill or continuous new-capture mining**, durable source watermarks/checkpoints, scheduling, I/O load verification or graph release promotion; current miner requires manually selected bounded sessions.

@@ -3,9 +3,9 @@ Description=Schedule finite NAV-10 candidate backfill with a pause after each ru
 Documentation=https://github.com/n0gr1p/UnifiedCapture/issues/14
 
 [Timer]
-OnActiveSec=5min
-OnUnitInactiveSec=15min
-AccuracySec=1min
+OnActiveSec=1min
+OnUnitInactiveSec=1min
+AccuracySec=10s
 Unit=unifiedcapture-nav-backfill.service
 Persistent=false
 

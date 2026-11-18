@@ -1,6 +1,6 @@
 # NAV-10: opt-in user systemd timer for bounded candidate backfill
 
-**Status:** Configuration files are committed to draft PR #18, but **no unit has been installed, enabled, or started on uuserver**. Keep the ingestion service running. All work here produces *candidate-only* NVMe graph records, not approved navigation edges.
+**Status 2026-11-18:** User-level service/timer are installed and the timer is **enabled** on uuserver; the first 10,000-event timer-triggered import succeeded, with independent cursor verification at 28,400 and ingestion health OK. `Linger=yes` was explicitly enabled. The PR now proposes a faster one-minute cadence, **not applied on the host until the operator installs and restarts the updated timer**. Keep the ingestion service running. All work here produces *candidate-only* NVMe graph records, not approved navigation edges.
 
 ## Proven inputs and constraints (2026-11-18)
 
@@ -10,13 +10,13 @@
 - Latest verified committed NVMe cursor is **18400**; initial raw high-water was **31153494** (roughly 31.1 million source rowids behind, before further live capture).
 - Five manually supervised windows of 2,000 rows successfully imported 10,000 rows with healthy post-run `/health`; no proven concurrent ingestion latency benchmark. Late out-of-order session chunks still produce `OUT_OF_ORDER_SESSION_SEQUENCE` until targeted repair is built.
 
-## Proposed finite schedule (conservative initial setting)
+## Updated bounded schedule (one-minute proposal)
 
 - User-owned *oneshot* service at `deploy/systemd/user/unifiedcapture-nav-backfill.service`.
 - **At most 5 batches x 2,000 events (10,000 rows) per invocation**; pause 5 seconds between batches. The cursor is independently verified after each committed batch.
-- **First start five minutes after timer activation; subsequent starts at least 15 minutes after the previous service finished**. No missed-run catch-up (`Persistent=false`); concurrent service runs are prevented by systemd, and the worker has its own advisory lock.
+- **First start one minute after timer activation; subsequent starts about one minute after the previous service finished**. No missed-run catch-up (`Persistent=false`); concurrent service runs are prevented by systemd, and the worker has its own advisory lock.
 - The service applies `Nice=10`, `IOSchedulingClass=idle` and a 180-second startup timeout, and it runs as the existing logged-in host user. The bounded source reader runs inside Docker as UID 10001. No service restart or raw capture DB writes.
-- Backlog is roughly 3,114 timer runs at 10,000 events each, approximately 32+ days at this conservative cadence. That's only a **theoretical lower bound**: new live events, reader pauses, source gaps, processing errors, throughput variation and offline periods may extend it.
+- Backlog is roughly 3,114 timer runs at 10,000 events each, approximately 3 days at this faster cadence if each run takes ~23 seconds plus a 60-second idle interval, with no growth or errors. That's only a **theoretical lower bound**: new live events, reader pauses, source gaps, processing errors, throughput variation and offline periods may extend it.
 - User-level systemd units run when the user's systemd user manager runs. **Persistence after logout/reboot depends on linger** (`loginctl show-user peter -p Linger`); do not silently enable linger, and obtain operator approval before changing login policy.
 
 ## Safe field acceptance, one checkpoint at a time
@@ -72,3 +72,13 @@
 **Failure policy:** The finite worker stops and exits nonzero on any untrusted source row order, reader/process error, stale cursor, or other unexpected failure. Inspect `journalctl --user -u unifiedcapture-nav-backfill.service`, disable the timer while investigating, and do not bypass `OUT_OF_ORDER_SESSION_SEQUENCE`. The timer's cadence may retry failed services; it is not self-healing.
 
 **No executable routing:** Cross-zone planner, transport integration and RemoteXI activity orchestration are separate NAV milestones.
+
+## Changing existing enabled timer from 15m to 1m (operator action)
+
+The service's per-run max-events, max-batches, pause and I/O priority remain unchanged. The timer file's `OnActiveSec=1min`, `OnUnitInactiveSec=1min` and `AccuracySec=10s` change only its cadence. After fetching the branch, **only** update the installed timer definition and restart that timer:
+
+~~~sh
+git -C ~/UnifiedCapture-NavDev fetch origin feature/nav-10-incremental-worker-20261118 && git -C ~/UnifiedCapture-NavDev switch --detach FETCH_HEAD && install -m 0644 ~/UnifiedCapture-NavDev/deploy/systemd/user/unifiedcapture-nav-backfill.timer ~/.config/systemd/user/ && systemctl --user daemon-reload && systemctl --user restart unifiedcapture-nav-backfill.timer && systemctl --user list-timers --all --no-pager | grep unifiedcapture-nav-backfill
+~~~
+
+Restarting the **timer** does not restart the existing ingest container or reset NVMe state. Watch journal and the capture `/health` endpoint after several runs. This increases source queries and HDD load substantially; if degradation occurs, stop the timer using `systemctl --user disable --now unifiedcapture-nav-backfill.timer` and investigate. A healthy post-run snapshot alone does not establish low concurrent upload latency. Late/out-of-order archival chunks can still halt imports.

@@ -150,6 +150,21 @@ class NavWorkerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "identity changed"):
             self.run_once()
 
+    def test_out_of_order_late_archival_chunk_fails_without_advancing_cursor(self):
+        self.record("A", 1, "position", 247, 1.0, (0, 0, 0), "anchor")
+        self.record("A", 3, "position", 247, 1.2, (1, 0, 0))
+        first = self.run_once()
+        self.assertEqual(first["new_evidence"], 1)
+        before = worker.load_state(self.state,
+            worker.identity(self.raw)[1], worker.identity(self.nav)[1])[0]
+        self.record("A", 2, "position", 247, 1.1, (0.5, 0, 0))
+        with self.assertRaisesRegex(ValueError, "OUT_OF_ORDER_SESSION_SEQUENCE"):
+            self.run_once()
+        after = worker.load_state(self.state,
+            worker.identity(self.raw)[1], worker.identity(self.nav)[1])[0]
+        self.assertEqual(after, before)
+        self.assertEqual(self.counts(), (2, 1, 1, 1))
+
     def test_no_cross_session_or_invalid_speed_and_direction(self):
         self.record("A", 1, "position", 247, 1.0, (0, 0, 0), "anchor")
         self.record("B", 1, "position", 247, 1.0, (100, 0, 0), "anchor")

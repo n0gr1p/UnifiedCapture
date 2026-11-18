@@ -47,6 +47,10 @@ A live host-user read-only SQLite open failed because the ingest directory is ow
 
 Independent read-only verification of the 2-batch split-worker pilot returned **checkpoint 400**, **1,286 nodes**, **1,402 directed edges**, **1,493 evidence refs**, and **zero executable edges**. These are total existing graph counts; **155 nodes / 153 edges / 153 evidence** were newly inserted by NAV-10 across two separate live batches. Next checkpoint: run one timed 2,000-event **dry run** to choose a safe historical-backfill budget. See [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14). No scheduled multi-million-event backfill or late-arrival repair exists yet.
 
+### NAV-10 timed read-only throughput sample — 2026-11-18
+
+A UID-10001 container-reader -> unprivileged host-consumer **2,000-event dry run succeeded** from checkpoint 400: 463 positions, 401 candidate pairs, 3 boundaries, 5 documents, 0 invalid positions, proposed end rowid 2400; **real time 0.421 seconds** (~4,750 events/sec for that short read-only sample). **No writes; committed checkpoint remains 400**. Next: time one 2,000-event **actual NVMe candidate import** (same bounded split workflow, only remove `--dry-run` from consumer); then introduce manual I/O-budgeted backfill loop. [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14) contains exact output. No schedule and no claim of full backfill.
+
 ### Current gaps: do not report these as completed
 
 - **No automated full-history backfill or continuous new-capture mining**, durable source watermarks/checkpoints, scheduling, I/O load verification or graph release promotion; current miner requires manually selected bounded sessions.

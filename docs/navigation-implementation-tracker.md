@@ -111,6 +111,10 @@ User ran `systemd-analyze --user verify` with no errors; `systemctl --user show`
 
 User explicitly enabled `unifiedcapture-nav-backfill.timer`; systemd created the `timers.target.wants` symlink and listed the **first scheduled run at Wed 2026-11-18 11:20:29 MST** (4m59s from activation). **Timer enabled, but no scheduled import verified yet.** Service still capped at 5x2k rows/run with five-second pauses; subsequent start 15m after completion. Last independent cursor: **18,400**. `Linger=no` unchanged, so no guaranteed headless continuation after logout/reboot. Next inspect service journal after first firing, persisted cursor, and ingestion `/health`. If import fails, stop timer; don't claim historic coverage or repair. [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
 
+### NAV-10 first timer-triggered unattended import PASS — 2026-11-18
+
+At **11:20:31 MST**, `unifiedcapture-nav-backfill.timer` triggered the first actual user-level backfill service. Systemd journal shows successful finite completion **11:20:53**, five 2k-event batches, 10k total, **0 invalid positions**, reported cursor **18,400→28,400**, **450 new nodes / 660 directed candidate edges / 883 evidence refs**, elapsed 22.586s including four 5s pauses, CPU time 1.287s. Cumulative NAV-10 live inserts now **2,956 nodes / 3,704 edges / 4,500 evidence**. The service success is confirmed; independently re-read cursor, ingestion health and next timer fire before declaring continuous operation. Timer remains enabled, but **`Linger=no`**—no reliable logout/reboot continuation until separately approved. Source historical backlog still ~31m rowids and late-session repair remains open. [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
+
 ### Current gaps: do not report these as completed
 
 - **No automated full-history backfill or continuous new-capture mining**, durable source watermarks/checkpoints, scheduling, I/O load verification or graph release promotion; current miner requires manually selected bounded sessions.

@@ -127,6 +127,10 @@ User explicitly ran `sudo loginctl enable-linger peter`; subsequent `loginctl sh
 
 User inspected installed timer: first start 5m, subsequent 15m after completion; asked to accelerate. PR #18 changes timer to `OnActiveSec=1min`, `OnUnitInactiveSec=1min`, `AccuracySec=10s`, with updated tests and [runbook](https://github.com/n0gr1p/UnifiedCapture/blob/feature/nav-10-incremental-worker-20261118/docs/nav-10-user-timer.md). **Host timer is still on old cadence until refreshed and restarted**; service budget unchanged (5x2k rows/run, 5s pauses). Next operator fetches latest PR, installs timer file only, `daemon-reload`, restarts user timer, inspects next trigger and monitored journal/ingestion health. Existing Linger=yes. Estimate ~3 days at recent 23s work + 60s pause pace is only theoretical; 31m backlog and out-of-order archival risks remain. [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
 
+### NAV-10 1-minute timer installed on host — 2026-11-18
+
+Operator fetched PR #18 commit `c3483bc`, installed the updated **timer only**, performed `daemon-reload` and restarted the user timer. Live systemd listing showed next **11:34:31 MST** and last **11:33:31 MST** (17ms before listing), consistent with the new one-minute cadence. Last trigger may have launched a service concurrently with the restart; **check current service state and journal** before declaring an additional successful scheduled import. Budget remains at most 5x2k rows/run with 5s pauses; timer enabled and `Linger=yes`. No changes to raw ingest or stored graph cursor. [NAV-10 #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
+
 ### Current gaps: do not report these as completed
 
 - **No automated full-history backfill or continuous new-capture mining**, durable source watermarks/checkpoints, scheduling, I/O load verification or graph release promotion; current miner requires manually selected bounded sessions.

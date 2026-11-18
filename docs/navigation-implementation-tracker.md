@@ -119,6 +119,10 @@ At **11:20:31 MST**, `unifiedcapture-nav-backfill.timer` triggered the first act
 
 Operator independently read the saved worker cursor **28,400**, verified ingestion `/health` returned `{"status":"ok","schema":1}`, and observed the next systemd user timer firing scheduled for **Wed 2026-11-18 11:35:53 MST** after first successful service run at 11:20:31–11:20:53. Timed backfill is now **enabled, one actual run successful, and next run scheduled**, not yet reboot-persistent because latest linger state is `Linger=no`. Next decision: operator may separately run `sudo loginctl enable-linger peter` and read back `Linger=yes` to permit background continuation after logout and reboot. No claim of full historical mining or out-of-order repair. [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
 
+### NAV-10 systemd lingering enabled — 2026-11-18
+
+User explicitly ran `sudo loginctl enable-linger peter`; subsequent `loginctl show-user peter -p Linger` returned **`Linger=yes`**. Already-enabled `unifiedcapture-nav-backfill.timer` can now remain active after logout and start automatically on boot (not reboot-tested). Earlier first scheduled batch succeeded, independently verified NVMe cursor **28,400**, ingestion health ok, and next timer scheduled at **11:35:53 MST**. Next confirm timer remains enabled/active and observe another run; full 31m-rowid historical backfill and out-of-order session repair remain open. [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
+
 ### Current gaps: do not report these as completed
 
 - **No automated full-history backfill or continuous new-capture mining**, durable source watermarks/checkpoints, scheduling, I/O load verification or graph release promotion; current miner requires manually selected bounded sessions.

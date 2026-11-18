@@ -107,6 +107,10 @@ Operator updated NavDev to `3b06eba`, installed the NAV-10 user service and time
 
 User ran `systemd-analyze --user verify` with no errors; `systemctl --user show` confirms **timer loaded/inactive/disabled**, **service loaded/inactive/static**. Definitions installed but neither active; `Linger=no` unchanged. Next optional operator opt-in: `systemctl --user enable --now unifiedcapture-nav-backfill.timer`, inspect scheduled next run, monitor actual journal and ingest health. First timer trigger ~5m; repeat 15m after the service completes, capped 5x2000 per invocation. Do not call timer operational until enabled and live run verified. [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
 
+### NAV-10 first opt-in timer enabled — 2026-11-18
+
+User explicitly enabled `unifiedcapture-nav-backfill.timer`; systemd created the `timers.target.wants` symlink and listed the **first scheduled run at Wed 2026-11-18 11:20:29 MST** (4m59s from activation). **Timer enabled, but no scheduled import verified yet.** Service still capped at 5x2k rows/run with five-second pauses; subsequent start 15m after completion. Last independent cursor: **18,400**. `Linger=no` unchanged, so no guaranteed headless continuation after logout/reboot. Next inspect service journal after first firing, persisted cursor, and ingestion `/health`. If import fails, stop timer; don't claim historic coverage or repair. [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
+
 ### Current gaps: do not report these as completed
 
 - **No automated full-history backfill or continuous new-capture mining**, durable source watermarks/checkpoints, scheduling, I/O load verification or graph release promotion; current miner requires manually selected bounded sessions.

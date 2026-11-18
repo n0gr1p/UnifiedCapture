@@ -35,6 +35,10 @@ A **200-event read-only host dry run succeeded** against the real HDD capture SQ
 
 A live host-user read-only SQLite open failed because the ingest directory is owned by UID 10001 and temporary WAL/SHM sidecars may vanish. **Draft PR #18 now adds a split reader/writer implementation**: read bounded raw events *inside the existing ingest container as UID 10001*, then pipe JSON to an unprivileged host consumer that updates Peter-owned NVMe graph/checkpoint. Synthetic split-worker tests passed; no live split-run yet. The **immediate one-step checkpoint** is a read-only container Python test documented in [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14). Do not give Peter write permission to raw ingestion, run the graph writer as root, or assume the worker has been scheduled.
 
+### NAV-10 first persistent live candidate import — 2026-11-18
+
+**SUCCESS:** split UID 10001 read-only container reader -> unprivileged `peter` importer processed first **200** raw event rowids (149 positions, 106 detected walking candidate pairs, 2 boundaries), inserted **106 new nodes / 105 directed edges / 105 evidence records** into NVMe, and reported checkpoint advancement **0 -> 200**. No Docker restart or raw HDD mutation was requested. See [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14) for exact JSON. **Next checkpoint:** read back persisted cursor and verify `peter` ownership of state and graph before processing rowids 201+. Production scheduling, all-history processing and late-session correction remain open.
+
 ### Current gaps: do not report these as completed
 
 - **No automated full-history backfill or continuous new-capture mining**, durable source watermarks/checkpoints, scheduling, I/O load verification or graph release promotion; current miner requires manually selected bounded sessions.

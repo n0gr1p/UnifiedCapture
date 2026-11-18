@@ -55,6 +55,10 @@ A UID-10001 container-reader -> unprivileged host-consumer **2,000-event dry run
 
 Real split-pipeline import from rowids **401–2400** passed: 463 positions, 401 candidate pairs, **370 new nodes / 391 edges / 400 evidence refs** (total NAV-10 additions across three runs: 525/544/553). Wall-clock `6.943s` included a `sudo` password prompt and is not a clean import throughput measurement. Reported committed cursor now 2400; independent readback pending. Next implement a bounded, pause-configurable manual backfill runner with no background service. See [issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
 
+### NAV-10 budgeted backfill runner drafted — 2026-11-18
+
+[Draft PR #18](https://github.com/n0gr1p/UnifiedCapture/pull/18) now has `scripts/nav_backfill_bounded.py` and test fixtures for bounded, multi-window, user-invoked historical backfill: read-only UID-10001 container extraction, unprivileged NVMe candidate import, strict max batches/events/pause, per-batch persisted cursor verification and fail-closed errors. **Default is one read-only dry-run window; writes require `--apply`**. Live three-batch-by-hand import proof succeeded through rowid 2400, but the **new orchestration script has not yet been run on uuserver**. Next: fetch updated branch, dry-run new runner, then supervised finite apply run. No scheduled service or late-chunk repair. See [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
+
 ### Current gaps: do not report these as completed
 
 - **No automated full-history backfill or continuous new-capture mining**, durable source watermarks/checkpoints, scheduling, I/O load verification or graph release promotion; current miner requires manually selected bounded sessions.

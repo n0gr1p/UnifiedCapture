@@ -27,6 +27,10 @@
 - **Current limitations:** this is a **manual, opt-in worker only**, not a deployed scheduled service. A late/out-of-order archival chunk for an already processed session causes `OUT_OF_ORDER_SESSION_SEQUENCE` and stops before checkpoint advancement; targeted per-session repair remains unbuilt. Real HDD performance, access permissions, cursor progression and a safe recurring schedule require operator test. **Do not claim the bulk corpus has been backfilled** merely because CI passes.
 - **Next immediate checkpoint:** verify PR #18 CI, then user runs **one bounded dry-run command** from the runbook on Ubuntu. No ingestion restart, privileged background service or raw data modification.
 
+### Latest live test — NAV-10 (2026-11-18)
+
+A **200-event read-only host dry run succeeded** against the real HDD capture SQLite (via `sudo`): 149 positions, 106 candidate edges, 2 observed boundaries, 2 candidate documents, no writes. Exact output and safe next checkpoint are recorded in [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14). Next check is Unix raw-read/NVMe-write permissions. **Do not use sudo for a mutating import** until privilege separation/file ownership is verified; no live import or schedule has yet run.
+
 ### Current gaps: do not report these as completed
 
 - **No automated full-history backfill or continuous new-capture mining**, durable source watermarks/checkpoints, scheduling, I/O load verification or graph release promotion; current miner requires manually selected bounded sessions.

@@ -214,6 +214,11 @@ def process_rows(rows, starting_last):
             continue
         point = (zone, seq, at, x, y, z, reason)
         previous = previous_by_session.get(session)
+        if previous is not None and seq <= previous[1]:
+            # Rowid is append order, not a license to infer temporal order.
+            # Backfilled/out-of-order chunks need indexed session repair, not
+            # a silently wrong bridge or a skipped source watermark.
+            raise ValueError("OUT_OF_ORDER_SESSION_SEQUENCE:" + session)
         valid, outcome = candidate_edge(previous, point)
         counters[outcome] += 1
         if valid:

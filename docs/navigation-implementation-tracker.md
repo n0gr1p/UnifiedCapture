@@ -59,6 +59,10 @@ Real split-pipeline import from rowids **401–2400** passed: 463 positions, 401
 
 [Draft PR #18](https://github.com/n0gr1p/UnifiedCapture/pull/18) now has `scripts/nav_backfill_bounded.py` and test fixtures for bounded, multi-window, user-invoked historical backfill: read-only UID-10001 container extraction, unprivileged NVMe candidate import, strict max batches/events/pause, per-batch persisted cursor verification and fail-closed errors. **Default is one read-only dry-run window; writes require `--apply`**. Live three-batch-by-hand import proof succeeded through rowid 2400, but the **new orchestration script has not yet been run on uuserver**. Next: fetch updated branch, dry-run new runner, then supervised finite apply run. No scheduled service or late-chunk repair. See [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
 
+### NAV-10 live bounded runner dry-run PASS — 2026-11-18
+
+At head `460b9e8`, the user successfully ran `scripts/nav_backfill_bounded.py --max-events 2000 --max-batches 3` without `--apply`: exactly **one** read-only 2,000-event window, 469 positions, 390 candidate pairs, 3 boundaries, 0 invalid samples, proposed rowid 2400→4400, **0 writes**, elapsed **0.587s**. It deliberately did not execute all 3 batches. Next: supervised finite `--apply --max-events 2000 --max-batches 3 --pause-seconds 5` and inspect outputs plus ingestion health. [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14) contains the exact result. No automated ongoing service yet.
+
 ### Current gaps: do not report these as completed
 
 - **No automated full-history backfill or continuous new-capture mining**, durable source watermarks/checkpoints, scheduling, I/O load verification or graph release promotion; current miner requires manually selected bounded sessions.

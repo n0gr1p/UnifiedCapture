@@ -123,6 +123,10 @@ Operator independently read the saved worker cursor **28,400**, verified ingesti
 
 User explicitly ran `sudo loginctl enable-linger peter`; subsequent `loginctl show-user peter -p Linger` returned **`Linger=yes`**. Already-enabled `unifiedcapture-nav-backfill.timer` can now remain active after logout and start automatically on boot (not reboot-tested). Earlier first scheduled batch succeeded, independently verified NVMe cursor **28,400**, ingestion health ok, and next timer scheduled at **11:35:53 MST**. Next confirm timer remains enabled/active and observe another run; full 31m-rowid historical backfill and out-of-order session repair remain open. [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
 
+### NAV-10 1-minute timer cadence prepared, host pending — 2026-11-18
+
+User inspected installed timer: first start 5m, subsequent 15m after completion; asked to accelerate. PR #18 changes timer to `OnActiveSec=1min`, `OnUnitInactiveSec=1min`, `AccuracySec=10s`, with updated tests and [runbook](https://github.com/n0gr1p/UnifiedCapture/blob/feature/nav-10-incremental-worker-20261118/docs/nav-10-user-timer.md). **Host timer is still on old cadence until refreshed and restarted**; service budget unchanged (5x2k rows/run, 5s pauses). Next operator fetches latest PR, installs timer file only, `daemon-reload`, restarts user timer, inspects next trigger and monitored journal/ingestion health. Existing Linger=yes. Estimate ~3 days at recent 23s work + 60s pause pace is only theoretical; 31m backlog and out-of-order archival risks remain. [NAV-10 issue #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
+
 ### Current gaps: do not report these as completed
 
 - **No automated full-history backfill or continuous new-capture mining**, durable source watermarks/checkpoints, scheduling, I/O load verification or graph release promotion; current miner requires manually selected bounded sessions.

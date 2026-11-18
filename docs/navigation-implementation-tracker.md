@@ -71,6 +71,10 @@ Operator ran `scripts/nav_backfill_bounded.py --apply --max-events 2000 --max-ba
 
 Operator independently confirmed persisted **cursor 8400** and `/health` returned `{"status":"ok","schema":1}` from `192.168.96.45:8787` after the finite three-batch backfill. Basic service availability is verified; impact on ingest latency, queueing, and HDD I/O **not yet measured**. Next take read-only process usage baseline and evaluate a finite run under observation; full historical backfill, late-chunk correction, and scheduled execution remain open. See [NAV-10 #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
 
+### NAV-10 initial live ingest resource snapshot — 2026-11-18
+
+After successful 3-batch NAV-10 run (cursor **8400**; `/health` status ok), single `docker stats --no-stream` read: ingest CPU **0.01%**, memory **3.871GiB/46.91GiB**, cumulative block I/O **8.83GB read / 234GB written**, PID count 1. **This is not a live I/O rate or proof of zero backfill impact.** Next test finite 5 x 2000-event applied windows with pauses and check service health, checkpoint and stats. See [NAV-10 #14](https://github.com/n0gr1p/UnifiedCapture/issues/14).
+
 ### Current gaps: do not report these as completed
 
 - **No automated full-history backfill or continuous new-capture mining**, durable source watermarks/checkpoints, scheduling, I/O load verification or graph release promotion; current miner requires manually selected bounded sessions.

@@ -26,10 +26,10 @@ class FakeCalls:
         self.calls.append((cmd, input_data, timeout))
         if "--cursor-only" in cmd:
             return str(self.cursor).encode()
-        if cmd[:5] == ["sudo", "docker", "compose", "exec", "-T"]:
+        if cmd[:4] == ["docker", "compose", "exec", "-T"]:
             self.reads += 1
             assert input_data is not None and b"emit_window" in input_data
-            assert cmd[5:8] == ["ingest", "python", "-"]
+            assert cmd[4:7] == ["ingest", "python", "-"]
             assert cmd[-1] == str(self.max_events)
             assert cmd[cmd.index("--after-rowid") + 1] == str(self.cursor)
             return b'{"some":"bounded stream"}'
@@ -107,7 +107,7 @@ class BackfillTests(unittest.TestCase):
         self.args.apply = True
         fake = FakeCalls()
         def fail_reader(command, **kwargs):
-            if command[0] == "sudo":
+            if command[0] == "docker":
                 raise RuntimeError("read failed")
             return fake(command, **kwargs)
         with self.assertRaisesRegex(RuntimeError, "read failed"):
@@ -134,7 +134,7 @@ class BackfillTests(unittest.TestCase):
     def test_oversized_reader_is_rejected_before_consumer(self):
         fake = FakeCalls()
         def oversized(command, **kwargs):
-            if command[0] == "sudo":
+            if command[0] == "docker":
                 return b" " * (runner.MAX_WINDOW_BYTES + 1)
             return fake(command, **kwargs)
         with self.assertRaisesRegex(ValueError, "4 MiB"):

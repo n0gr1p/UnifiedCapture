@@ -3,7 +3,7 @@
 
 Run from the existing UnifiedCapture Compose directory as the normal host
 user (NOT sudo). The source reader executes inside the already-running
-ingestion container (UID 10001), emitting one bounded JSON window. Only the
+ingestion container (UID 10001) through the already-authorized Docker socket, emitting one bounded JSON window. Only the
 unprivileged host consumer writes NVMe graph/checkpoint data.
 
 No cron, service changes, Docker restart, raw writes or edge approvals.
@@ -117,7 +117,7 @@ def execute(args, *, call=invoke, sleeper=time.sleep, clock=time.monotonic):
         for i in range(args.max_batches):
             cursor = numeric_cursor(raw, nav, state, worker, call)
             source = call([
-                "sudo", "docker", "compose", "exec", "-T",
+                "docker", "compose", "exec", "-T",
                 "ingest", "python", "-", "--db", "/data/capture.sqlite3",
                 "--after-rowid", str(cursor),
                 "--max-events", str(args.max_events),

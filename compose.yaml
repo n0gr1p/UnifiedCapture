@@ -12,35 +12,9 @@ services:
       - "${UCAP_BIND:-127.0.0.1}:8787:8787"
     volumes:
       - ./server-data:/data
+      # Read-only derived NAV graph on NVMe; never raw HDD telemetry.
+      - "${UCAP_NAV_DATA_DIR:-../UnifiedCapture-NavDev/nav-data}:/nav-data:ro"
     # Some hosts reject Python exec with Docker no-new-privileges enabled.
     # Keep UID 10001 and drop all Linux capabilities instead.
-    cap_drop:
-      - ALL
-
-  # This is part of the SAME UnifiedCapture Compose application, but not
-  # the ingestion process. Starting/updating it never recreates ingest.
-  nav-query:
-    build:
-      context: .
-      dockerfile: server/Dockerfile.nav-query
-    restart: unless-stopped
-    # The Python API only permits a specific RFC1918/loopback bind, not
-    # 0.0.0.0. Host networking retains that restriction in a container.
-    network_mode: host
-    env_file:
-      # Existing owner-only token created by the earlier pilot.
-      - ${UCAP_NAV_ENV_FILE:-../.config/unifiedcapture-nav/query.env}
-    command:
-      - python
-      - nav_route_query.py
-      - --nav-db
-      - /nav-data/navigation.sqlite3
-      - --host
-      - ${UCAP_NAV_BIND:-${UCAP_BIND:-127.0.0.1}}
-    # Run as the Ubuntu user that owns the continuously updated graph.
-    user: "${UCAP_NAV_RUN_AS:-1000:1000}"
-    volumes:
-      - "${UCAP_NAV_DATA_DIR:-../UnifiedCapture-NavDev/nav-data}:/nav-data:ro"
-    read_only: true
     cap_drop:
       - ALL

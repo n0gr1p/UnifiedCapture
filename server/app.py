@@ -6,6 +6,7 @@ import logging
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import BoundedSemaphore
 from urllib.parse import parse_qs, urlsplit
 
 from navigation import (NavigationQueryError, dataset as navigation_dataset,
@@ -13,11 +14,14 @@ from navigation import (NavigationQueryError, dataset as navigation_dataset,
                         sessions as navigation_sessions, route_events as navigation_route_events)
 
 from storage import IngestError, MAX_BODY_BYTES, ingest, initialize, recover, stats, verify_file
+from nav_route_query import MAX_REQUEST_BYTES as NAV_MAX_REQUEST_BYTES, route_query
 
 LOG = logging.getLogger("unifiedcapture")
+# One candidate-only planning query at a time protects the ingestion threads.
+NAV_QUERY_SLOT = BoundedSemaphore(1)
 
 
-def serve(host, port, db_path, archive_dir, token):
+def serve(host, port, db_path, archive_dir, token, nav_db_path="/nav-data/navigation.sqlite3"):
     if not token or len(token) < 16 or token.startswith("REPLACE_"):
         raise ValueError("UCAP_API_TOKEN must be set to at least 16 characters")
     initialize(db_path)
@@ -112,6 +116,54 @@ def serve(host, port, db_path, archive_dir, token):
 
         def do_POST(self):
             path = urlsplit(self.path).path
+            if path == "/v1/nav/preview":
+                if not self.authorized():
+                    return
+                if self.headers.get("Transfer-Encoding"):
+                    self.respond(400, {"status": "INVALID_REQUEST",
+                                       "reason": "CHUNKED_UNSUPPORTED"})
+                    return
+                if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
+                    self.respond(415, {"status": "INVALID_REQUEST",
+                                       "reason": "JSON_REQUIRED"})
+                    return
+                size = self.headers.get("Content-Length", "")
+                if not size.isascii() or not size.isdecimal():
+                    self.respond(411, {"status": "INVALID_REQUEST",
+                                       "reason": "LENGTH_REQUIRED"})
+                    return
+                length = int(size)
+                if not 1 <= length <= NAV_MAX_REQUEST_BYTES:
+                    self.respond(413, {"status": "INVALID_REQUEST",
+                                       "reason": "REQUEST_TOO_LARGE"})
+                    return
+                if not NAV_QUERY_SLOT.acquire(blocking=False):
+                    self.respond(429, {"status": "NAV_QUERY_BUSY"})
+                    return
+                try:
+                    raw = self.rfile.read(length)
+                    if len(raw) != length:
+                        self.respond(400, {"status": "INVALID_REQUEST",
+                                           "reason": "INCOMPLETE_JSON"})
+                        return
+                    try:
+                        request = json.loads(raw.decode("utf-8"))
+                    except (ValueError, UnicodeError):
+                        self.respond(400, {"status": "INVALID_REQUEST",
+                                           "reason": "INVALID_JSON"})
+                        return
+                    try:
+                        code, payload = route_query(nav_db_path, request)
+                    except Exception:
+                        LOG.exception("Navigation preview failure")
+                        self.respond(503, {"schema_version": 1,
+                                           "status": "GRAPH_UNAVAILABLE",
+                                           "reason": "NAV_QUERY_FAILED"})
+                        return
+                    self.respond(code, payload)
+                finally:
+                    NAV_QUERY_SLOT.release()
+                return
             if path not in ("/v1/ingest", "/v1/verify-file"):
                 self.respond(404, {"error": "not found"})
                 return
@@ -176,6 +228,8 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=int(os.getenv("UCAP_PORT", "8787")))
     parser.add_argument("--db", default=os.getenv("UCAP_DB", "/data/capture.sqlite3"))
     parser.add_argument("--archive", default=os.getenv("UCAP_ARCHIVE", "/data/archive"))
+    parser.add_argument("--nav-db", default="/nav-data/navigation.sqlite3",
+                        help="Derived NVMe SQLite; never the HDD ingest database")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    serve(args.host, args.port, args.db, args.archive, os.getenv("UCAP_API_TOKEN", ""))
+    serve(args.host, args.port, args.db, args.archive, os.getenv("UCAP_API_TOKEN", ""), args.nav_db)

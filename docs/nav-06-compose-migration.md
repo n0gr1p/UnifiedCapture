@@ -1,59 +1,58 @@
-# NAV-06: integrate query API into live UnifiedCapture Compose project
+# NAV-06: unify candidate route preview with existing ingestion API
 
-This is a *narrow deployment overlay* based on
-`feature/navigation-readonly-queries`, the existing Ubuntu ingestion
-checkout. It copies the NAV-06 candidate preview module/tests from
-[UCapture PR #19](https://github.com/n0gr1p/UnifiedCapture/pull/19)
-without pulling NAV-10/backfill implementation changes into ingestion.
+This replaces the experimental separate port-18788 listener and Compose
+`nav-query` sidecar. The existing authenticated API on **8787** now serves
+`POST /v1/nav/preview`, reusing the **existing `UCAP_API_TOKEN`**.
+No extra listener, systemd service, Docker image, firewall rule, or secret.
 
-## Invariants
+## API and data safety
 
-- The existing `ingest` service in `compose.yaml` is byte-for-byte
-  unchanged. The untracked `compose.override.yaml` is **not modified**;
-  it continues pointing the ingestion volume to
-  `/home/peter/bulk-storage/UnifiedCapture/server-data`.
-- The new `nav-query` service is part of this **same Docker Compose
-  project**, with `restart: unless-stopped` and its own image. It does not
-  recreate, stop or depend on `ingest`.
-- The *only* data mount on the new service is the derived
-  `../UnifiedCapture-NavDev/nav-data:/nav-data:ro` directory,
-  **not** the HDD-backed ingest volume.
-- The standalone pilot secret at
-  `~/.config/unifiedcapture-nav/query.env` is reused as an `env_file`.
-  Never check it into Git or print its contents. The endpoint itself is
-  restricted to an explicit loopback or RFC1918 IPv4, with bearer auth.
-- The graph is still candidate-only, `release_status=not_built` and
-  `approved_for_movement=false`. No UC movement is authorized.
+- Authentication is exactly the existing ingestion Bearer-token check.
+  Request payload: `{"zone":247,"from_xyz":[x,y,z],"to_xyz":[x,y,z]}`.
+- A strict 1 KiB request limit, fixed Rabao zone 247, directed graph only,
+  1-yalm node snap, 100-yalm total distance, 3x detour ceiling, and 101
+  output waypoint ceiling. Unsupported queries fail closed.
+- One preview query runs at a time so bursts don't overwhelm ingestion;
+  concurrent requests receive `429 NAV_QUERY_BUSY`.
+- The derived **NVMe** navigation directory is mounted into the existing
+  ingest container at `/nav-data:ro`; the route handler opens
+  `/nav-data/navigation.sqlite3` with SQLite `mode=ro` and
+  `PRAGMA query_only=ON`. The graph schema's application ID is validated.
+- The existing HDD telemetry mount from the **untracked**
+  `compose.override.yaml` is preserved. All other ingest endpoints
+  (`/v1/ingest`, `/v1/verify-file`, existing telemetry GETs) remain
+  intact, and the running NAV-10 backfill timer is unrelated.
+- Every candidate route response says `approved_for_movement=false`,
+  with `release_status=not_built`. No executable navigation or scheduler
+  movement integration exists in this slice.
+- API on 8787 is **HTTP, not TLS**: firewall the existing port to trusted
+  Windows clients only, and never router-forward to the Internet.
 
-## Single-service migration (operator-controlled)
+## Controlled deploy on Ubuntu (one operator checkpoint at a time)
 
-1. On Ubuntu, check the current live branch is
-   `feature/navigation-readonly-queries` with only untracked
-   `compose.override.yaml`, then fetch the
-   `feature/nav-06-compose-live-integration-20261119` branch and switch
-   to it. **Do not run `docker compose up` for the full stack.**
-2. Run `docker compose config --quiet`; inspect
-   `docker compose config --format json` to verify the new nav-query
-   only mounts the NVMe derived directory and binds the private IP, while
-   `ingest` keeps the HDD override. Validate access permissions without
-   changing raw telemetry.
-3. Stop and disable **only** the temporary standalone service to release
-   port 18788:
-   `systemctl --user disable --now uc-nav-query.service`.
-   Keep the existing token file and systemd unit for rollback.
-4. Launch **only** the nav-query container from the live Compose project:
-   `docker compose up -d --no-deps --build nav-query`.
-   Then `docker compose ps nav-query`, check the nav service logs for a
-   local bind error, and verify an unauthenticated POST from Windows
-   returns `401`.
-5. Confirm authentication and a Rabao `ROUTE_PREVIEW` in shadow-only
-   mode before any consideration of movement. The newer shorter route
-   has not been field validated.
+1. Pull branch `feature/nav-06-compose-live-integration-20261119`
+   into the already checked-out `~/UnifiedCapture`. Check the diff and
+   verify the untracked `compose.override.yaml` remains in place.
+2. Run `docker compose config` and confirm there is **only** `ingest`
+   with two mounts: HDD `/data` and NVMe `/nav-data:ro`. Confirm
+   `/nav-data/navigation.sqlite3` is readable by the existing ingest
+   container UID/GID **10001:10001** before restarting anything.
+3. Build/recreate **only** `ingest`:
+   `docker compose up -d --build --no-deps ingest`. This causes a brief
+   ingest API restart; it does not remove, migrate, or replace the raw
+   HDD archive and database, and it does not stop NAV-10.
+4. Verify `/health` and `/v1/stats` on 8787, then POST an authenticated
+   Rabao preview with **the same `UCAP_API_TOKEN`**. Expected:
+   HTTP 200, `ROUTE_PREVIEW`, ~15 waypoints, `approved_for_movement=false`.
+   Verify the existing Windows uploader resumes after the restart.
+5. Only **after** that succeeds, retire the orphaned
+   `unifiedcapture-nav-query-1` container on port 18788. The temporary
+   `uc-nav-query.service` was already stopped and disabled; keep its
+   credential file temporarily until Windows UC has been configured with
+   the *existing ingestion token* instead of the old navigation token.
+   Do not reuse the old token or expose it in chat.
 
-Rollback: `docker compose stop nav-query`, then
-`systemctl --user enable --now uc-nav-query.service`.
-Do not touch the `ingest` service or the NAV-10 backfill timer.
-
-Plain HTTP on a private LAN does not encrypt bearer tokens. Restrict
-TCP/18788 at the host firewall to the gaming PC; never forward it from the
-router to the Internet. TLS is preferable if LAN compromise is in scope.
+No `docker compose down`, no volume deletion, no broad service recreate,
+no changes to NAV-10 miner, and no automatic walking. If the updated image
+fails, restore the original `feature/navigation-readonly-queries` branch
+and rebuild only `ingest`; the HDD dataset and graph are unchanged.

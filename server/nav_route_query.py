@@ -161,9 +161,14 @@ def bind_address(host):
         address = ipaddress.ip_address(host)
     except ValueError as exc:
         raise ValueError("Host must be a numeric private or loopback IPv4 address") from exc
+    private_lan = (
+        ipaddress.ip_network("10.0.0.0/8"),
+        ipaddress.ip_network("172.16.0.0/12"),
+        ipaddress.ip_network("192.168.0.0/16"),
+    )
     if (not isinstance(address, ipaddress.IPv4Address)
-            or address.is_unspecified or address.is_multicast
-            or address.is_link_local or not address.is_private):
+            or not (address.is_loopback or any(
+                address in block for block in private_lan))):
         raise ValueError("Host must be a specific private or loopback IPv4 address")
     return str(address)
 

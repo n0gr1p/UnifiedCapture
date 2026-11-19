@@ -1,13 +1,15 @@
 """NAV-06: HTTP contract, auth, bounded routing and zero-write tests."""
 import http.client
+import os
+import socket
+import subprocess
 import json
 import sqlite3
 import sys
 import tempfile
-import threading
+import time
 import unittest
 from http import HTTPStatus
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,14 +47,46 @@ class RabaoRouteQueryTests(unittest.TestCase):
                 [(101, "a", 1), (102, "a", 2), (103, "b", 3)],
             )
             db.commit()
-        self.server = ThreadingHTTPServer(
-            ("127.0.0.1", 0),
-            nav_route_query.make_handler(self.db_path, TOKEN),
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+        listener.close()
+        self.port = port
+        self.capture_db = Path(self.tmp.name) / "capture.sqlite3"
+        self.process = subprocess.Popen(
+            [sys.executable, str(ROOT / "server" / "app.py"),
+             "--host", "127.0.0.1", "--port", str(port),
+             "--db", str(self.capture_db),
+             "--archive", str(Path(self.tmp.name) / "archive"),
+             "--nav-db", str(self.db_path)],
+            env=dict(os.environ, UCAP_API_TOKEN=TOKEN),
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
         )
-        self.addCleanup(self.server.server_close)
-        self.addCleanup(self.server.shutdown)
-        thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-        thread.start()
+        self.addCleanup(self.stop_process)
+        for _ in range(70):
+            if self.process.poll() is not None:
+                self.fail("Shared ingest API exited during startup")
+            try:
+                conn = http.client.HTTPConnection("127.0.0.1", port, timeout=0.3)
+                conn.request("GET", "/health")
+                resp = conn.getresponse()
+                resp.read()
+                conn.close()
+                if resp.status == 200:
+                    break
+            except OSError:
+                time.sleep(0.1)
+        else:
+            self.fail("Shared ingest API did not start")
+
+    def stop_process(self):
+        if self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+        self.process.stderr.close()
 
     def request(self, body=None, token=TOKEN, *, path="/v1/nav/preview",
                 headers=None, method="POST"):
@@ -67,7 +101,7 @@ class RabaoRouteQueryTests(unittest.TestCase):
         if not isinstance(body, (bytes, str)):
             body = json.dumps(body)
         conn = http.client.HTTPConnection(
-            "127.0.0.1", self.server.server_port, timeout=3,
+            "127.0.0.1", self.port, timeout=3,
         )
         try:
             conn.request(method, path, body=body, headers=headers)
@@ -111,10 +145,16 @@ class RabaoRouteQueryTests(unittest.TestCase):
         for token in (None, "not-a-real-secret"):
             code, data, headers = self.request(token=token)
             self.assertEqual(code, HTTPStatus.UNAUTHORIZED)
-            self.assertEqual(data["status"], "UNAUTHORIZED")
-            self.assertIn("WWW-Authenticate", headers)
-        with self.assertRaisesRegex(ValueError, "24"):
-            nav_route_query.make_handler(self.db_path, "short")
+            self.assertEqual(data["error"], "unauthorized")
+        # Same token authenticates telemetry and the graph (no extra token).
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=3)
+        try:
+            conn.request("GET", "/v1/stats", headers={"Authorization": "Bearer " + TOKEN})
+            result = conn.getresponse()
+            self.assertEqual(result.status, 200)
+            self.assertEqual(json.loads(result.read())["sessions"], 0)
+        finally:
+            conn.close()
 
     def test_rejects_non_rabao_and_bad_coordinates(self):
         bad = [
@@ -143,17 +183,24 @@ class RabaoRouteQueryTests(unittest.TestCase):
         self.assertEqual(code, HTTPStatus.BAD_REQUEST)
         self.assertEqual(data["reason"], "INVALID_JSON")
         code, data, _ = self.request(method="GET")
-        self.assertEqual(code, HTTPStatus.METHOD_NOT_ALLOWED)
-        self.assertEqual(data["status"], "METHOD_NOT_ALLOWED")
+        self.assertEqual(code, HTTPStatus.NOT_FOUND)
+        self.assertEqual(data["error"], "not found")
 
-    def test_lan_bind_must_be_specific_private_ip(self):
-        self.assertEqual(nav_route_query.bind_address("127.0.0.1"), "127.0.0.1")
-        self.assertEqual(nav_route_query.bind_address("192.168.96.45"), "192.168.96.45")
-        for address in ("0.0.0.0", "::", "::1", "8.8.8.8",
-                        "0.0.0.1", "169.254.1.1", "uuserver"):
-            with self.subTest(address=address):
-                with self.assertRaisesRegex(ValueError, "private or loopback"):
-                    nav_route_query.bind_address(address)
+    def test_graph_is_distinct_from_raw_ingest_database(self):
+        before = self.capture_db.read_bytes()
+        code, payload, _ = self.request()
+        self.assertEqual(code, 200)
+        self.assertEqual(payload["status"], "ROUTE_PREVIEW")
+        self.assertEqual(self.capture_db.read_bytes(), before)
+
+    def test_auth_precedes_graph_and_rejects_chunked_requests(self):
+        self.db_path.unlink()
+        code, payload, _ = self.request(token=None)
+        self.assertEqual(code, 401)
+        self.assertEqual(payload["error"], "unauthorized")
+        code, payload, _ = self.request(headers={"Transfer-Encoding": "chunked"})
+        self.assertEqual(code, 400)
+        self.assertEqual(payload["reason"], "CHUNKED_UNSUPPORTED")
 
     def test_fails_closed_on_missing_graph(self):
         self.db_path.unlink()

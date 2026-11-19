@@ -1,0 +1,10 @@
+# Isolated read-only NAV-06 query service, managed by the same Compose project.
+# Never mounts or imports the raw telemetry ingestion DB or writer.
+FROM python:3.12-alpine
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+WORKDIR /srv
+COPY server/derived_navigation_db.py server/nav_route_preview.py server/nav_route_query.py ./
+RUN addgroup -S -g 10001 capture && adduser -S -D -u 10001 -G capture capture
+USER capture
+EXPOSE 18788
+CMD ["python", "nav_route_query.py", "--nav-db", "/nav-data/navigation.sqlite3"]

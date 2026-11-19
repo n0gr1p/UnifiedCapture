@@ -26,12 +26,10 @@ jobs:
         run: |
           python -m compileall -q server client tests
           python -m unittest discover -s tests -p 'test_*.py' -v
-      - name: Validate two-service Compose config
+      - name: Validate shared API Compose config
         run: |
           printf 'UCAP_API_TOKEN=ci-only-placeholder-not-real\n' > .env
-          printf 'UC_NAV_QUERY_TOKEN=ci-only-placeholder-with-length-32\n' > nav-query-test.env
-          UCAP_NAV_ENV_FILE=./nav-query-test.env docker compose config --quiet
+          docker compose config --quiet
+          docker compose config --format json | python3 -c 'import json,sys; s=json.load(sys.stdin)["services"]; assert set(s)=={"ingest"}, s.keys(); v={m["target"]:m for m in s["ingest"]["volumes"]}; assert v["/nav-data"]["read_only"] is True; assert v["/data"]["read_only"] is not True'
       - name: Docker image build
-        run: |
-          docker build -f server/Dockerfile -t unifiedcapture-ingest:test .
-          docker build -f server/Dockerfile.nav-query -t unifiedcapture-nav-query:test .
+        run: docker build -f server/Dockerfile -t unifiedcapture-ingest:test .

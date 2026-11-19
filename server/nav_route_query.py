@@ -5,6 +5,7 @@ candidate edges, scan HDD telemetry, control UC, or run on import.
 """
 import argparse
 import hmac
+import ipaddress
 import json
 import os
 import sqlite3
@@ -154,23 +155,42 @@ def make_handler(nav_db, token):
     return Handler
 
 
+def bind_address(host):
+    """Allow only a specific local/private IPv4 interface, never wildcard/public."""
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError as exc:
+        raise ValueError("Host must be a numeric private or loopback IPv4 address") from exc
+    if (not isinstance(address, ipaddress.IPv4Address)
+            or address.is_unspecified or address.is_multicast
+            or address.is_link_local or not address.is_private):
+        raise ValueError("Host must be a specific private or loopback IPv4 address")
+    return str(address)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--nav-db", required=True,
                         help="Explicit derived NVMe SQLite; NEVER raw capture DB")
+    parser.add_argument("--host", default="127.0.0.1",
+                        help="Specific private LAN IP, default loopback")
     parser.add_argument("--port", type=int, default=18788)
     args = parser.parse_args(argv)
     if not 1 <= args.port <= 65535:
         parser.error("port must be in the range 1..65535")
+    try:
+        host = bind_address(args.host)
+    except ValueError as exc:
+        parser.error(str(exc))
     token = os.environ.get("UC_NAV_QUERY_TOKEN", "")
     if len(token) < 24:
         parser.error("Set UC_NAV_QUERY_TOKEN to a strong secret (24+ chars)")
     # Fail before opening the listener if the target is not a derived graph.
     derived_navigation_db.inspect(args.nav_db)
     handler = make_handler(args.nav_db, token)
-    # Intentionally inaccessible from Windows/LAN until transport/TLS is designed.
-    with ThreadingHTTPServer(("127.0.0.1", args.port), handler) as server:
-        print("NAV-06 candidate-preview listener on 127.0.0.1:"
+    # Bind ONLY the named private interface; never expose on all networks.
+    with ThreadingHTTPServer((host, args.port), handler) as server:
+        print("NAV-06 candidate-preview listener on " + host + ":"
               + str(args.port), flush=True)
         server.serve_forever()
 

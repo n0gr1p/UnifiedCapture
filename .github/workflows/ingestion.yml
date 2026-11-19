@@ -36,6 +36,11 @@ jobs:
         run: bash -n scripts/preview_zone247_candidate.sh
       - name: Check navigation MVP exporter shell syntax
         run: bash -n scripts/export_nav_mvp_pilot.sh
+      - name: Validate two-service Docker Compose config
+        run: |
+          printf 'UCAP_API_TOKEN=ci-only-placeholder-not-real\n' > .env
+          printf 'UC_NAV_QUERY_TOKEN=ci-only-placeholder-with-length-32\n' > nav-query-test.env
+          UCAP_NAV_ENV_FILE=./nav-query-test.env docker compose config --quiet
       - name: Docker image build
         run: |
           docker build -f server/Dockerfile -t unifiedcapture-ingest:test .

@@ -146,6 +146,15 @@ class RabaoRouteQueryTests(unittest.TestCase):
         self.assertEqual(code, HTTPStatus.METHOD_NOT_ALLOWED)
         self.assertEqual(data["status"], "METHOD_NOT_ALLOWED")
 
+    def test_lan_bind_must_be_specific_private_ip(self):
+        self.assertEqual(nav_route_query.bind_address("127.0.0.1"), "127.0.0.1")
+        self.assertEqual(nav_route_query.bind_address("192.168.96.45"), "192.168.96.45")
+        for address in ("0.0.0.0", "::", "::1", "8.8.8.8",
+                        "0.0.0.1", "169.254.1.1", "uuserver"):
+            with self.subTest(address=address):
+                with self.assertRaisesRegex(ValueError, "private or loopback"):
+                    nav_route_query.bind_address(address)
+
     def test_fails_closed_on_missing_graph(self):
         self.db_path.unlink()
         code, data, _ = self.request()

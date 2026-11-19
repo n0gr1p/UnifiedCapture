@@ -64,3 +64,54 @@ use an HTTPS reverse proxy and an authenticated client. The existing capture
 ingest service (port 8787) is unchanged; navigation remains a separate process.
 The old CSV pilot stays unchanged. Validated release serving and movement
 arbitration remain separate gates.
+
+## Managed deployment: same Docker Compose project (preferred)
+
+The NAV API is now a **separate container under the existing `compose.yaml`**,
+not a separate systemd service. The ingest service stanza is unchanged.
+Only the optional `nav-query` image is built/started when explicitly targeted:
+
+```sh
+docker compose up -d --build --no-deps nav-query
+```
+
+The container uses `network_mode: host` on Linux so the existing
+`nav_route_query.py` RFC1918-only bind restriction still applies;
+it never binds `0.0.0.0`. The interface defaults to the already configured
+`UCAP_BIND`; override with `UCAP_NAV_BIND=192.168.96.45` if necessary.
+It uses `restart: unless-stopped` just like ingest. Navigation has a
+**separate Docker image, command, and unprivileged process**: updating or
+restarting it never restarts the ingest container.
+
+The container mounts only the existing **NVMe derived navigation directory**
+read-only at `/nav-data`. Default path from the Compose checkout is
+`../UnifiedCapture-NavDev/nav-data` (override `UCAP_NAV_DATA_DIR`).
+It does **not** mount the HDD-backed `server-data` volume.
+The existing token file from the earlier one-off systemd pilot,
+`~/.config/unifiedcapture-nav/query.env`, is reused via
+`UCAP_NAV_ENV_FILE` (default `../.config/unifiedcapture-nav/query.env`).
+Do not duplicate this token in Git or in the ingest `.env`.
+The default container user `1000:1000` matches the expected graph owner;
+override `UCAP_NAV_RUN_AS=uid:gid` if that owner differs.
+
+**Safe migration from the temporary standalone unit:**
+
+1. Confirm that the live `~/UnifiedCapture` checkout can incorporate the
+   new NAV Compose stanza and Dockerfile without replacing any local work.
+   The PR branch also depends on NAV-10; do **not** blindly switch or reset
+   the running ingestion checkout to that branch.
+2. Stop and disable the redundant unit **before** launching the container,
+   because both would claim `192.168.96.45:18788`:
+   `systemctl --user disable --now uc-nav-query.service`.
+   Keep its secret file, graph and worktrees unchanged.
+3. Start **only** `nav-query` with the command above from the normal
+   UnifiedCapture Compose project. Confirm `docker compose ps nav-query`
+   and a probe returning HTTP 401 unauthenticated, then an authenticated
+   `ROUTE_PREVIEW`. If startup fails, the old unit can be restarted
+   immediately without impacting ingest.
+
+Because the host has a live deployment on a different branch, the operator
+checkout/migration is a separate checkpoint from this GitHub draft.
+**Do not run** `docker compose down`, `up --force-recreate` across the whole
+stack, or a new `systemctl --user enable` here. This is still a diagnostic,
+unapproved candidate graph; none of the Compose changes permit movement.

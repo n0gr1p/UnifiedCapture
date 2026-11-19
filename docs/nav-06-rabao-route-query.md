@@ -7,7 +7,7 @@ release service or the NAV-09 executable navigation interface.
 
 ## Contract (v1 pilot)
 
-- `POST /v1/nav/preview` on **127.0.0.1:18788 only**, never LAN by default.
+- `POST /v1/nav/preview` on **127.0.0.1:18788** by default; opt-in **192.168.96.45:18788** for trusted private LAN. Wildcard/public binds are refused, never LAN by default.
 - Require `Authorization: Bearer <token>` from `UC_NAV_QUERY_TOKEN` (24+ chars).
   Do not commit tokens. There is no anonymous or raw SQL endpoint.
 - Request body is strictly `{"zone":247,"from_xyz":[x,y,z],"to_xyz":[x,y,z]}`.
@@ -42,20 +42,25 @@ scripts and graph unchanged. Example from that isolated checkout:
 
 ```sh
 export UC_NAV_QUERY_TOKEN="$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')"
-python3 server/nav_route_query.py --nav-db /home/peter/UnifiedCapture-NavDev/nav-data/navigation.sqlite3
+python3 server/nav_route_query.py --host 192.168.96.45 --nav-db /home/peter/UnifiedCapture-NavDev/nav-data/navigation.sqlite3
 ```
 
-In another shell on **the Ubuntu host** (not Windows), issue one read-only
+In another shell on **Windows or Ubuntu**, issue one read-only
 Rabao query using the proven field-test endpoints:
 
 ```sh
-curl --fail-with-body -sS http://127.0.0.1:18788/v1/nav/preview \
+curl --fail-with-body -sS http://192.168.96.45:18788/v1/nav/preview \
   -H "Authorization: Bearer $UC_NAV_QUERY_TOKEN" \
   -H "Content-Type: application/json" \
   --data '{"zone":247,"from_xyz":[-20.5,111.0,8.0],"to_xyz":[1.5,114.5,8.0]}'
 ```
 
 The generated token must be available in the querying shell as well.
-**Do not publish or forward this plaintext HTTP pilot over LAN.** The eventual
-Windows UC transport, validated release serving, and movement arbitration are
-separate implementation gates. The old CSV pilot stays unchanged.
+**Security boundary:** This pilot is plain HTTP and Bearer tokens could be
+intercepted by a compromised device on the LAN. Bind only to the specific
+private server IP, firewall TCP/18788 to the Windows UC machine(s), and never
+forward the port from your router to the Internet. For stronger protection
+use an HTTPS reverse proxy and an authenticated client. The existing capture
+ingest service (port 8787) is unchanged; navigation remains a separate process.
+The old CSV pilot stays unchanged. Validated release serving and movement
+arbitration remain separate gates.

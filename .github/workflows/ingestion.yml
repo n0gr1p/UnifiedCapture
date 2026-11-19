@@ -37,4 +37,6 @@ jobs:
       - name: Check navigation MVP exporter shell syntax
         run: bash -n scripts/export_nav_mvp_pilot.sh
       - name: Docker image build
-        run: docker build -f server/Dockerfile -t unifiedcapture-ingest:test .
+        run: |
+          docker build -f server/Dockerfile -t unifiedcapture-ingest:test .
+          docker build -f server/Dockerfile.nav-query -t unifiedcapture-nav-query:test .

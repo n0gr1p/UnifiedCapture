@@ -120,6 +120,10 @@ def preview(nav_db, zone, start, goal, snap_radius=1.0,
             FROM walk_edge WHERE zone_id=?""", (zone,)):
             if a not in nodes or b not in nodes:
                 raise ValueError("Dangling walking edge")
+            if status == "failed":
+                continue  # Never route over a confirmed failed directed edge.
+            if status not in ("ready", "proven"):
+                raise ValueError("Unrecognized walking readiness state")
             outgoing[a].append((b, eid, length))
             edge_status[eid] = status
         for adj in outgoing.values():
@@ -186,10 +190,10 @@ def preview(nav_db, zone, start, goal, snap_radius=1.0,
             "release_status": info["release_status"],
             "approved_for_movement": False,
             "safety_note": (
-                "READ-ONLY candidate preview; quantized nodes and historical "
-                "edge evidence do not establish physical walkability. "
-                "Do not execute this path in UC without independent "
-                "field validation and guarded opt-in."
+                "READ-ONLY READY/PROVEN graph preview: FAILED edges excluded. "
+                "UC may execute READY walking edges only after explicitly "
+                "armed guarded movement integration; this preview alone "
+                "never grants scheduler ownership or movement approval."
             ),
         }
     finally:

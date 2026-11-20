@@ -1,6 +1,7 @@
 -- Passive, read-only navigation observations. Lua 5.1 compatible.
 local M = {}
 local entity_tracker = require('entity_tracker')
+local nav_outcome_record = require('nav_outcome_record')
 local P = {}
 P.__index = P
 local SAMPLE_INTERVAL = 0.30
@@ -83,6 +84,27 @@ function P:emit(kind, data, at, observer)
     if #self.pending >= 64 then self:flush() end
 end
 
+function P:nav_outcome(args)
+    -- Same-client addon command, NOT network/IPC. A recorder must already
+    -- be running; never forge a new capture session just for navigation.
+    if not self.active then return false,'CAPTURE_NOT_RECORDING' end
+    local ok_player,player=pcall(self.env.player)
+    local ok_info,info=pcall(self.env.info)
+    if not ok_player or not ok_info then
+        return false,'NAV_OUTCOME_SNAPSHOT_UNAVAILABLE'
+    end
+    local data,why=nav_outcome_record.decode(args,player,info)
+    if not data then return false,why end
+    local s=snapshot(self)
+    if not s then return false,'NAV_OUTCOME_SNAPSHOT_UNAVAILABLE' end
+    self:emit('nav_edge_outcome',data,self.env.now(),s)
+    -- Persist now, not at the ordinary 64-row/2-second interval. The
+    -- existing uploader can use its immutable source-file offset as usual.
+    self:flush()
+    if not self.active then return false,'NAV_OUTCOME_WRITE_FAILED' end
+    return true,'NAV_OUTCOME_DURABLE'
+end
+
 function P:check_entity_zone(zone, reason, at, observer)
     if not zone or self.entity_zone == zone then return end
     local prior = self.entity_zone
@@ -134,7 +156,7 @@ local function begin_segment(self, file, id)
     self.entity_zone, self.menu, self.menu_counter = nil, nil, 0
     self.last_sample, self.last_flush = 0, self.env.now()
     self.session_started_at = self.env.now()
-    self:emit('session_start', {schema=2, recorder_version='0.2.4'})
+    self:emit('session_start', {schema=2, recorder_version='0.2.5'})
     self:tick(true)
 end
 function P:rotate(reason)

@@ -11,7 +11,8 @@ import sqlite3
 from pathlib import Path
 
 MAX_EVENTS = 2000
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+MAX_OUTCOME_JSON_BYTES = 4096
 
 
 def emit_window(db_path, after_rowid, max_events):
@@ -40,6 +41,47 @@ def emit_window(db_path, after_rowid, max_events):
                 ON p.session=e.session AND p.sequence=e.sequence
             WHERE e.rowid > ? ORDER BY e.rowid LIMIT ?
         """, (after_rowid, max_events)).fetchall()
+        outcomes = []
+        # Reuse the same bounded raw-event cursor as walking mining. Only
+        # selected NAV outcome rows are parsed; no general raw JSON copied.
+        if rows and any(row[3] == "nav_edge_outcome" for row in rows):
+            columns = {col[1] for col in db.execute("PRAGMA table_info(events)")}
+            if "raw_json" not in columns:
+                raise ValueError("Navigation outcomes require original raw_json")
+            for row in rows:
+                if row[3] != "nav_edge_outcome":
+                    continue
+                raw, actor = db.execute(
+                    "SELECT raw_json, character FROM events WHERE rowid=?",
+                    (row[0],)).fetchone()
+                if not isinstance(raw, str) or len(raw) > MAX_OUTCOME_JSON_BYTES:
+                    raise ValueError("Missing or oversized navigation outcome")
+                try:
+                    payload = json.loads(raw)
+                except ValueError as exc:
+                    raise ValueError("Invalid archived navigation outcome JSON") from exc
+                if (not isinstance(payload, dict)
+                        or payload.get("event") != "nav_edge_outcome"
+                        or payload.get("session") != row[1]
+                        or payload.get("sequence") != row[2]
+                        or payload.get("character") != actor
+                        or payload.get("zone") != row[4]):
+                    raise ValueError("Navigation event provenance mismatch")
+                outcomes.append({
+                    "source_rowid": row[0], "source_session": row[1],
+                    "source_sequence": row[2], "character": actor,
+                    "zone": row[4],
+                    "nav_event_id": payload.get("nav_event_id"),
+                    "nav_run_id": payload.get("nav_run_id"),
+                    "nav_edge_id_str": payload.get("nav_edge_id_str"),
+                    "nav_kind": payload.get("nav_kind"),
+                    "nav_reason": payload.get("nav_reason"),
+                    "nav_confirmed": payload.get("nav_confirmed"),
+                    "nav_from_index": payload.get("nav_from_index"),
+                    "nav_to_index": payload.get("nav_to_index"),
+                    "x": payload.get("x"), "y": payload.get("y"),
+                    "z": payload.get("z"),
+                })
     finally:
         db.close()
     return {
@@ -48,6 +90,7 @@ def emit_window(db_path, after_rowid, max_events):
         "after_rowid": after_rowid,
         "last_rowid": rows[-1][0] if rows else after_rowid,
         "rows": rows,
+        "outcomes": outcomes,
     }
 
 

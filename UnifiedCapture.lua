@@ -1,6 +1,6 @@
 _addon.name = 'UnifiedCapture'
 _addon.author = 'n0gr1p'
-_addon.version = '0.2.4'
+_addon.version = '0.2.5'
 _addon.commands = {'ucapture', 'ucap'}
 
 local capture = require('capture')
@@ -37,8 +37,23 @@ windower.register_event('incoming chunk', function(id, original, modified, injec
 end)
 windower.register_event('logout', function() recorder:stop('logout') end)
 windower.register_event('unload', function() recorder:stop('unload') end)
-windower.register_event('addon command', function(command)
+windower.register_event('addon command', function(command, ...)
     command = tostring(command or 'status'):lower()
+    if command == 'navout' then
+        local arguments={...}
+        local ok,reason = recorder:nav_outcome(arguments)
+        if ok then
+            -- Acknowledge ONLY after the recorder has written+flushed JSONL.
+            -- This is the same Windower client, not a cross-client broadcast.
+            local event_id=arguments[1]
+            windower.send_command(
+                'lua c unifiedcombat nav-outcome-ack ' .. event_id)
+        else
+            windower.add_to_chat(167,
+                '[UnifiedCapture] NAV outcome not recorded: ' .. tostring(reason))
+        end
+        return
+    end
     if command == 'on' or command == 'start' then recorder:start()
     elseif command == 'off' or command == 'stop' then recorder:stop('manual')
     elseif command == 'status' then recorder:status()

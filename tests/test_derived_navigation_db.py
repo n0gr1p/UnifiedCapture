@@ -36,7 +36,7 @@ class DerivedNavigationSchemaTests(unittest.TestCase):
         first = nav.initialize(self.path)
         second = nav.initialize(self.path)
         self.assertEqual(first, second)
-        self.assertEqual(first["schema_version"], 1)
+        self.assertEqual(first["schema_version"], 2)
         self.assertEqual(first["release_status"], "not_built")
         self.assertIsNone(first["release_id"])
         self.assertFalse(first["raw_telemetry_copied"])
@@ -71,7 +71,7 @@ class DerivedNavigationSchemaTests(unittest.TestCase):
             VALUES (1,100,1,2,10,0.8)""")
         self.assertEqual(db.execute(
             "SELECT status FROM walk_edge WHERE edge_id=1").fetchone()[0],
-            "candidate")
+            "ready")
         with self.assertRaises(sqlite3.IntegrityError):
             db.execute("""INSERT INTO walk_edge
                 (zone_id,from_node_id,to_node_id,cost,confidence)

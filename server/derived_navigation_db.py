@@ -1,15 +1,16 @@
 """Bootstrap the compact, rebuildable navigation SQLite (not raw telemetry).
 
 This file is intentionally independent of storage.py and the ingestion server.
-An initialized database has *no published navigation release* and is not
-permission to execute movement. Mining and publication are later slices.
+An initialized database has *no published navigation release*. READY walking
+edges are navigation-eligible data, but this schema alone grants no UC
+movement ownership or automatic execution.
 """
 import argparse
 import json
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 APPLICATION_ID = 0x55434E56  # "UCNV": distinct from the raw capture database
 
 SCHEMA_SQL = """
@@ -51,8 +52,8 @@ CREATE TABLE walk_edge (
     to_node_id INTEGER NOT NULL,
     cost REAL NOT NULL CHECK (cost >= 0),
     confidence REAL NOT NULL CHECK (confidence BETWEEN 0 AND 1),
-    status TEXT NOT NULL DEFAULT 'candidate'
-        CHECK (status IN ('candidate', 'validated', 'executable')),
+    status TEXT NOT NULL DEFAULT 'ready'
+        CHECK (status IN ('ready', 'proven', 'failed')),
     evidence_count INTEGER NOT NULL DEFAULT 0 CHECK (evidence_count >= 0),
     CHECK (from_node_id <> to_node_id),
     FOREIGN KEY (zone_id, from_node_id) REFERENCES node(zone_id, node_id),
@@ -60,6 +61,22 @@ CREATE TABLE walk_edge (
     UNIQUE (zone_id, from_node_id, to_node_id)
 );
 CREATE INDEX idx_walk_edge_from ON walk_edge(zone_id, from_node_id, status);
+
+-- Runtime walking outcomes are independent of historical HDD evidence.
+-- Two distinct navigation runs with confirmed blocks are needed to fail an edge.
+CREATE TABLE edge_outcome (
+    outcome_id INTEGER PRIMARY KEY,
+    event_id TEXT NOT NULL UNIQUE CHECK (length(event_id) BETWEEN 8 AND 128),
+    edge_id INTEGER NOT NULL REFERENCES walk_edge(edge_id),
+    run_id TEXT NOT NULL CHECK (length(run_id) BETWEEN 8 AND 128),
+    kind TEXT NOT NULL CHECK (kind IN ('traversed', 'blocked', 'interrupted')),
+    reason TEXT NOT NULL CHECK (length(reason) BETWEEN 1 AND 96),
+    recorded_at TEXT NOT NULL CHECK (length(recorded_at) BETWEEN 10 AND 40),
+    confirmed INTEGER NOT NULL CHECK (confirmed IN (0, 1)),
+    CHECK (kind <> 'blocked' OR confirmed = 1)
+);
+CREATE INDEX idx_edge_outcome_edge
+    ON edge_outcome(edge_id, outcome_id, run_id, kind);
 
 -- A transport may connect different zones and NEVER implies reverse travel
 -- or ordinary walking. Executable transports require an activation method;

@@ -22,6 +22,7 @@ from pathlib import Path
 
 import derived_navigation_db
 import walk_candidate_miner as miner
+import nav_outcome_replay
 
 MAX_EVENTS = 2000
 MAX_BATCHES = 25
@@ -254,6 +255,10 @@ def run_once(raw_db, nav_db, state_db, max_events=1000, dry_run=False):
     with single_worker(state_path, dry_run):
         previous_rowid, anchors = load_state(state_path, raw_id, nav_id)
         rows = raw_events(raw, previous_rowid, max_events)
+        if any(row[3] == "nav_edge_outcome" for row in rows):
+            # Direct raw reader is legacy/dev only. The split-privilege v2
+            # stream must preserve raw event details before advancing cursor.
+            raise ValueError("NAV_OUTCOME_REQUIRES_V2_SPLIT_READER")
         if not rows:
             return {"processed_events": 0, "after_rowid": previous_rowid,
                     "last_rowid": previous_rowid, "dry_run": dry_run,
@@ -311,7 +316,7 @@ def consume_stream(raw_db, nav_db, state_db, stream, dry_run=False):
     if (not isinstance(doc, dict)
             or doc.get("source_schema") != "UnifiedCapture/events"
             or type(doc.get("stream_version")) is not int
-            or doc["stream_version"] != 1
+            or doc["stream_version"] not in (1, 2)
             or type(doc.get("after_rowid")) is not int
             or doc["after_rowid"] < 0
             or type(doc.get("last_rowid")) is not int
@@ -319,6 +324,11 @@ def consume_stream(raw_db, nav_db, state_db, stream, dry_run=False):
             or len(doc["rows"]) > MAX_EVENTS):
         raise ValueError("Invalid source event window envelope")
     rows = doc["rows"]
+    outcomes = doc.get("outcomes", []) if doc["stream_version"] == 2 else []
+    if not isinstance(outcomes, list) or len(outcomes) > MAX_EVENTS:
+        raise ValueError("Invalid NAV outcome stream budget")
+    if doc["stream_version"] == 1 and "outcomes" in doc:
+        raise ValueError("Legacy NAV source cannot carry outcome data")
     previous_id = doc["after_rowid"]
     for row in rows:
         if not isinstance(row, list) or len(row) != 10:
@@ -328,6 +338,19 @@ def consume_stream(raw_db, nav_db, state_db, stream, dry_run=False):
         previous_id = row[0]
     if doc["last_rowid"] != previous_id:
         raise ValueError("Source rowid cursor mismatch")
+    expected = {row[0]: row for row in rows if row[3] == "nav_edge_outcome"}
+    actual = {}
+    for outcome in outcomes:
+        if not isinstance(outcome, dict):
+            raise ValueError("Invalid projected NAV outcome")
+        rowid = outcome.get("source_rowid")
+        if type(rowid) is not int or rowid not in expected or rowid in actual:
+            raise ValueError("Unmatched or repeated projected NAV outcome")
+        nav_outcome_replay.validate(outcome, expected_row=expected[rowid])
+        actual[rowid] = outcome
+    if set(expected) != set(actual):
+        # Never advance past an archived NAV outcome without consuming it.
+        raise ValueError("NAV outcomes missing from read-only source stream")
     with single_worker(state, dry_run):
         committed, anchors = load_state(state, raw_id, nav_id)
         if committed != doc["after_rowid"]:
@@ -345,6 +368,13 @@ def consume_stream(raw_db, nav_db, state_db, stream, dry_run=False):
                 stats["documents"] += 1
                 for key in ("new_nodes", "new_edges", "new_evidence"):
                     stats[key] += result[key]
+            # Writes are idempotent by event_id. Import graph evidence first
+            # so a subsequent same-window outcome can identify its edge.
+            for rowid, outcome in sorted(actual.items()):
+                replayed = nav_outcome_replay.replay(
+                    nav, outcome, expected_row=expected[rowid])
+                stats["outcomes_recorded"] += int(replayed["recorded"])
+            # A crash between outcome commit and cursor commit replays safely.
             store_state(state, raw_id, nav_id, latest, next_anchors)
         return {
             "processed_events": counters["events"],
@@ -359,6 +389,8 @@ def consume_stream(raw_db, nav_db, state_db, stream, dry_run=False):
             "new_nodes": stats["new_nodes"],
             "new_edges": stats["new_edges"],
             "new_evidence": stats["new_evidence"],
+            "outcomes_seen": len(outcomes),
+            "outcomes_recorded": stats["outcomes_recorded"],
         }
 
 

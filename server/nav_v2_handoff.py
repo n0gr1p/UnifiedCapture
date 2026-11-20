@@ -5,6 +5,7 @@ Acquires the same exclusive worker lock as NAV-10 to snapshot graph and
 cursor consistently. The operator must pause the timer for live cutover.
 """
 import argparse
+from contextlib import closing
 import fcntl
 import json
 import os
@@ -53,9 +54,10 @@ def handoff_copy(raw_db, graph_v1, state_v1, graph_v2, state_v2):
                 os.close(fd)
                 temp = Path(name)
                 os.chmod(temp, stat.S_IMODE(old_state.stat().st_mode))
-                with sqlite3.connect(
+                with closing(sqlite3.connect(
                     old_state.as_uri() + "?mode=ro", uri=True, timeout=10
-                ) as read_db, sqlite3.connect(temp, timeout=10) as write_db:
+                )) as read_db, closing(sqlite3.connect(
+                    temp, timeout=10)) as write_db:
                     read_db.execute("PRAGMA query_only=ON")
                     read_db.backup(write_db)
                     write_db.execute("BEGIN IMMEDIATE")

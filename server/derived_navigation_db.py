@@ -123,7 +123,7 @@ def inspect(path):
         db.execute("PRAGMA query_only=ON")
         app_id = db.execute("PRAGMA application_id").fetchone()[0]
         version = db.execute("PRAGMA user_version").fetchone()[0]
-        if app_id != APPLICATION_ID or version != SCHEMA_VERSION:
+        if app_id != APPLICATION_ID or version not in (1, 2):
             raise ValueError(
                 "Refusing unrelated or unsupported SQLite database: "
                 f"application_id={app_id}, schema_version={version}"

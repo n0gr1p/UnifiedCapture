@@ -54,8 +54,9 @@ def validate(outcome, *, expected_row):
             or zone != 247 or outcome.get("zone") != zone):
         raise ValueError("NAV outcome source identity mismatch")
     edge_str = outcome.get("nav_edge_id_str")
-    if (not isinstance(edge_str, str) or not edge_str.isascii()
-            or not edge_str.isdecimal() or edge_str[0] == "0"
+    if (not isinstance(edge_str, str) or not edge_str
+            or not edge_str.isascii() or not edge_str.isdecimal()
+            or edge_str[0] == "0"
             or len(edge_str) > 19):
         raise ValueError("Invalid exact directed edge ID")
     edge_id = int(edge_str)
@@ -73,7 +74,9 @@ def validate(outcome, *, expected_row):
     result = outcome.get("nav_kind")
     reason = outcome.get("nav_reason")
     confirmed = outcome.get("nav_confirmed")
-    if (result not in lifecycle.OUTCOMES
+    if (not isinstance(result, str)
+            or result not in lifecycle.OUTCOMES
+            or not isinstance(reason, str)
             or type(confirmed) is not bool
             or reason not in (
                 lifecycle.SUCCESS_REASONS if result == "traversed"

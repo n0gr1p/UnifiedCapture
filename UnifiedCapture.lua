@@ -37,8 +37,14 @@ windower.register_event('incoming chunk', function(id, original, modified, injec
 end)
 windower.register_event('logout', function() recorder:stop('logout') end)
 windower.register_event('unload', function() recorder:stop('unload') end)
-windower.register_event('addon command', function(command)
+windower.register_event('addon command', function(command, ...)
     command = tostring(command or 'status'):lower()
+    if command == 'navout' then
+        local ok,reason = recorder:nav_outcome({...})
+        if not ok then windower.add_to_chat(167,
+            '[UnifiedCapture] NAV outcome not recorded: ' .. tostring(reason)) end
+        return
+    end
     if command == 'on' or command == 'start' then recorder:start()
     elseif command == 'off' or command == 'stop' then recorder:stop('manual')
     elseif command == 'status' then recorder:status()

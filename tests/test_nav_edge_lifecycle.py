@@ -32,9 +32,11 @@ class ReadyProvenFailedTests(unittest.TestCase):
         }
         miner.import_candidates(self.db_path, self.doc)
         with sqlite3.connect(self.db_path) as db:
-            self.edges = db.execute(
-                "SELECT edge_id FROM walk_edge ORDER BY rowid").fetchall()
-            self.edge_id = self.edges[0][0]
+            self.edge_id = db.execute("""
+                SELECT e.edge_id FROM walk_edge AS e
+                JOIN node AS n ON n.node_id=e.from_node_id
+                WHERE n.zone_id=247 AND n.x=0 AND n.y=0 AND n.z=0
+            """).fetchone()[0]
 
     def state(self):
         with sqlite3.connect(self.db_path) as db:

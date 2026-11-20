@@ -19,7 +19,7 @@ privilege, or movement control.
    `nav_edge_outcome` event to its existing capture-session JSONL.
    It calls `flush()` immediately rather than waiting two seconds.
    Only after a successful flush does it reply locally to UC with
-   `lua c UnifiedCombat nav-outcome-ack EVENT_ID`.
+   `lua c unifiedcombat nav-outcome-ack EVENT_ID`.
 4. The existing uploader archives the JSONL **unchanged** using its normal
    checkpointed file offsets and existing authenticated
    `POST /v1/ingest` endpoint at port **8787**. No new HTTP writes.

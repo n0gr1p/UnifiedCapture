@@ -27,7 +27,7 @@ class RoutePreviewTests(unittest.TestCase):
             db.executemany("""
                 INSERT INTO walk_edge(edge_id,zone_id,from_node_id,to_node_id,
                                       cost,confidence,status)
-                VALUES (?,247,?,?,?,0.25,'candidate')""",
+                VALUES (?,247,?,?,?,0.25,'ready')""",
                 [(101,1,2,1),(102,2,3,1),(103,3,4,1),
                  (104,4,3,1),(105,1,4,5)])
             db.executemany("""
@@ -48,6 +48,7 @@ class RoutePreviewTests(unittest.TestCase):
         self.assertEqual(result["waypoint_count"], 4)
         self.assertEqual(result["edges_seen_in_multiple_recording_sessions"], 1)
         self.assertEqual(result["legs"][0]["observations"], 2)
+        self.assertEqual(result["legs"][0]["edge_status"], "ready")
         self.assertEqual(result["legs"][0]["distinct_recording_sessions"], 2)
         self.assertEqual(result["edges_without_evidence"], 0)
         self.assertEqual(result["release_status"], "not_built")

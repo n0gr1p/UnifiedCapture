@@ -111,7 +111,7 @@ class DerivedNavigationSchemaTests(unittest.TestCase):
              "inspect", "--db", str(self.path)],
             check=True, capture_output=True, text=True,
         )
-        self.assertIn('"schema_version": 1', proc.stdout)
+        self.assertIn('"schema_version": 2', proc.stdout)
 
 
 if __name__ == "__main__":

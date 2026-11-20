@@ -49,6 +49,8 @@ class RoutePreviewTests(unittest.TestCase):
         self.assertEqual(result["edges_seen_in_multiple_recording_sessions"], 1)
         self.assertEqual(result["legs"][0]["observations"], 2)
         self.assertEqual(result["legs"][0]["edge_status"], "ready")
+        self.assertEqual(result["legs"][0]["edge_id_str"],
+                         str(result["legs"][0]["edge_id"]))
         self.assertEqual(result["legs"][0]["distinct_recording_sessions"], 2)
         self.assertEqual(result["edges_without_evidence"], 0)
         self.assertEqual(result["release_status"], "not_built")

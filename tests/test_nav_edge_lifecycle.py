@@ -98,6 +98,19 @@ class ReadyProvenFailedTests(unittest.TestCase):
                             "interrupted", "casting", confirmed=False)
         self.assertEqual(third["state"], "failed")
 
+    def test_old_success_replay_does_not_override_newer_failed_state(self):
+        self.report("event-succ-01", "route-0001",
+                    "traversed", "completed_edge")
+        self.assertEqual(self.state(), "proven")
+        self.report("event-blk-01", "route-0002", "blocked", "stalled")
+        self.report("event-blk-02", "route-0003", "blocked", "obstacle")
+        self.assertEqual(self.state(), "failed")
+        replay = self.report("event-succ-01", "route-0001",
+                             "traversed", "completed_edge")
+        self.assertFalse(replay["recorded"])
+        self.assertEqual(replay["state"], "failed")
+        self.assertEqual(self.state(), "failed")
+
     def test_confirmed_recovery_resets_fail_count_to_proven(self):
         self.report("event-blk-01", "route-0001", "blocked", "stalled")
         self.report("event-blk-02", "route-0002", "blocked", "obstacle")

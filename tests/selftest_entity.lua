@@ -275,7 +275,7 @@ c:stop('test')
 io.open = oldopen
 local jsonl=table.concat(rows)
 assert(jsonl:find('"schema":2',1,true))
-assert(jsonl:find('"recorder_version":"0.2.4"',1,true))
+assert(jsonl:find('"recorder_version":"0.2.5"',1,true))
 assert(jsonl:find('"packet_id":91',1,true) and jsonl:find('"entity_kind":"monster"',1,true))
 assert(jsonl:find('"observer_x":5',1,true), 'original observer position preserved')
 assert(jsonl:find('"observation_kind":"last_seen"',1,true))

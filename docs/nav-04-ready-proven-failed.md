@@ -64,12 +64,28 @@ It maps each such edge to READY and preserves node IDs, direction,
 leaves the original untouched and does not overwrite the destination.
 It does not publish, deploy or replace a live database.
 
-**Critical NAV-10 checkpoint dependency:** The incremental miner binds
-its cursor/last-position ledger to the graph file's absolute path, device
-and inode. A newly copied v2 graph has a different identity. Before
-production cutover we must implement/test an explicit, coordinated
-checkpoint handoff with the NAV-10 worker paused and a consistent graph
-snapshot; never reset the cursor or silently skip HDD data.
+**NAV-10 checkpoint identity handoff is implemented and tested, but NOT
+deployed.** The incremental miner binds its cursor/last-position ledger
+to the graph file's absolute path, device and inode. A copied v2 graph
+has a different identity.
+
+`nav_v2_handoff.py` acquires the **same exclusive worker lock** as NAV-10,
+copies the v1 graph into v2, and copies the worker checkpoint with its
+raw-event cursor and session position anchors **unchanged**, rebinding
+only the new graph identity in that copied checkpoint. It refuses an
+active worker lock, mismatched existing identities, missing checkpoints,
+or existing destination files. The old graph and worker state remain
+intact; the command does **not** install a new timer or switch the
+running ingestion API.
+
+For live cutover, the operator must first pause the NAV-10 timer and
+verify no other graph writer is active, then invoke the **copy-only**
+handoff using new destination paths, verify both copies and update the
+worker/API to the new graph consistently. The existing 8787 API reader
+and UC shadow parser have separate staged backward-compatible support
+for READY/PROVEN edge statuses; they must also be deployed and verified.
+The source/worker must not be restarted against mixed old/new paths.
+Never reset the cursor or silently skip HDD data.
 
 Cutover must also update the existing UnifiedCapture API route modules
 and the Windower NAV-08 parser to accept `ready/proven` edge statuses.

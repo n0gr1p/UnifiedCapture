@@ -163,7 +163,8 @@ def preview(nav_db, zone, start, goal, snap_radius=1.0,
             legs.append({
                 "from_index": len(legs),
                 "to_index": len(legs) + 1,
-                "edge_id": eid,
+                "edge_id": eid,  # legacy JSON number (Lua may round)
+                "edge_id_str": str(eid),  # exact 62-bit stable identity
                 "length_yalms": round(cost, 2),
                 "edge_status": edge_status[eid],
                 "observations": len(provenance),

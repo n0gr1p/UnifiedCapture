@@ -54,8 +54,21 @@ def record_outcome(nav_db, *, edge_id, event_id, run_id, kind, reason,
         previous = db.execute("""SELECT edge_id, run_id, kind, reason, confirmed
             FROM edge_outcome WHERE event_id=?""", (event_id,)).fetchone()
         expected = (edge_id, run_id, kind, reason, int(confirmed))
-        if previous is not None and previous != expected:
-            raise ValueError("Conflicting duplicate navigation outcome event")
+        if previous is not None:
+            if previous != expected:
+                raise ValueError("Conflicting duplicate navigation outcome event")
+            # Replaying an old success after newer confirmed failures must
+            # NEVER restore an edge from FAILED to PROVEN.
+            db.commit()
+            blocks = db.execute("""SELECT COUNT(DISTINCT run_id)
+                FROM edge_outcome WHERE edge_id=? AND kind='blocked' AND confirmed=1
+                AND outcome_id > (SELECT COALESCE(MAX(outcome_id),0)
+                                  FROM edge_outcome WHERE edge_id=?
+                                  AND kind='traversed' AND confirmed=1)""",
+                (edge_id, edge_id)).fetchone()[0]
+            return {"edge_id": edge_id, "state": row[0],
+                    "confirmed_block_runs_since_success": blocks,
+                    "recorded": False}
         if previous is None:
             # Multiple reports from the same UC navigation run do not count
             # as independent confirmations of one blocked edge.
@@ -79,11 +92,6 @@ def record_outcome(nav_db, *, edge_id, event_id, run_id, kind, reason,
             FROM edge_outcome WHERE edge_id=? AND kind='blocked'
             AND confirmed=1 AND outcome_id>?""", (edge_id, latest_success)
         ).fetchone()[0]
-        success = latest_success > 0 and (
-            db.execute("""SELECT kind FROM edge_outcome
-                WHERE edge_id=? ORDER BY outcome_id DESC LIMIT 1""",
-                (edge_id,)).fetchone()[0] == "traversed"
-        )
         # A transient interruption should preserve the prior state.
         current = row[0]
         if kind == "traversed":

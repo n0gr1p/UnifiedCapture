@@ -102,12 +102,24 @@ def replay(nav_db, outcome, *, expected_row):
         outcome, expected_row=expected_row)
     with sqlite3.connect(nav_db) as db:
         db.execute("PRAGMA query_only=ON")
+        previous = db.execute("""SELECT edge_id,run_id,kind,reason,confirmed
+            FROM edge_outcome WHERE event_id=?""", (eid,)).fetchone()
         row = db.execute("""
             SELECT e.zone_id,a.x,a.y,a.z,b.x,b.y,b.z
             FROM walk_edge e
             JOIN node a ON a.node_id=e.from_node_id
             JOIN node b ON b.node_id=e.to_node_id
             WHERE e.edge_id=?""", (edge_id,)).fetchone()
+    # A local receipt can be lost after capture flushed. A retry records
+    # the same event in a *later* snapshot, possibly after the character
+    # walked away. Ignore newer XYZ only for an identical, ledger-known
+    # event_id; always reject conflicting reuse of that identity.
+    if previous is not None:
+        if previous != (edge_id, run_id, kind, reason, int(confirmed)):
+            raise ValueError("Conflicting duplicate navigation outcome")
+        return lifecycle.record_outcome(
+            nav_db, edge_id=edge_id, event_id=eid, run_id=run_id,
+            kind=kind, reason=reason, confirmed=confirmed)
     if not row or row[0] != 247:
         raise ValueError("Navigation outcome references unknown or wrong-zone edge")
     start, end = row[1:4], row[4:7]

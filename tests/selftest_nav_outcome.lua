@@ -25,7 +25,7 @@ local bad={
     {index=5,value='combat'},
     {index=6,value='0'},
     {index=7,value='1'},
-    {index=8,value='1'},
+    {index=8,value='0'},
 }
 for i,mutation in ipairs(bad) do
     local changed=copy(valid);changed[mutation.index]=mutation.value

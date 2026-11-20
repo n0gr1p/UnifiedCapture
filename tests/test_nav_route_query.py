@@ -125,6 +125,50 @@ class RabaoRouteQueryTests(unittest.TestCase):
         self.assertEqual(headers["Cache-Control"], "no-store")
         self.assertEqual(self.db_path.read_bytes(), before)
 
+    def test_read_only_v2_ready_proven_and_failed_route_exclusion(self):
+        # Upgrade only this disposable fixture; the actual deployed graph
+        # remains v1 until a coordinated, checkpoint-safe operator cutover.
+        with sqlite3.connect(self.db_path) as db:
+            db.execute("PRAGMA foreign_keys=OFF")
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("""CREATE TABLE walk_edge_v2 (
+                edge_id INTEGER PRIMARY KEY, zone_id INTEGER NOT NULL
+                REFERENCES zone(zone_id),
+                from_node_id INTEGER NOT NULL, to_node_id INTEGER NOT NULL,
+                cost REAL NOT NULL CHECK (cost >= 0),
+                confidence REAL NOT NULL CHECK (confidence BETWEEN 0 AND 1),
+                status TEXT NOT NULL DEFAULT 'ready'
+                    CHECK (status IN ('ready','proven','failed')),
+                evidence_count INTEGER NOT NULL DEFAULT 0,
+                CHECK (from_node_id <> to_node_id),
+                FOREIGN KEY (zone_id,from_node_id) REFERENCES node(zone_id,node_id),
+                FOREIGN KEY (zone_id,to_node_id) REFERENCES node(zone_id,node_id),
+                UNIQUE(zone_id,from_node_id,to_node_id))""")
+            db.execute("""INSERT INTO walk_edge_v2
+                (edge_id,zone_id,from_node_id,to_node_id,cost,confidence,
+                 status,evidence_count)
+                SELECT edge_id,zone_id,from_node_id,to_node_id,cost,confidence,
+                       'ready',evidence_count FROM walk_edge""")
+            db.execute("DROP TABLE walk_edge")
+            db.execute("ALTER TABLE walk_edge_v2 RENAME TO walk_edge")
+            db.execute("CREATE INDEX idx_walk_edge_from ON walk_edge(zone_id,from_node_id,status)")
+            db.execute("UPDATE walk_edge SET status='proven' WHERE edge_id=102")
+            db.execute("PRAGMA user_version=2")
+            db.commit()
+        code, result, _ = self.request()
+        self.assertEqual(code, 200)
+        self.assertEqual(result["status"], "ROUTE_PREVIEW")
+        self.assertEqual([leg["edge_status"] for leg in result["preview"]["legs"]],
+                         ["ready", "proven", "ready"])
+        self.assertFalse(result["approved_for_movement"])
+        with sqlite3.connect(self.db_path) as db:
+            db.execute("UPDATE walk_edge SET status='failed' WHERE edge_id=102")
+        code, result, _ = self.request()
+        self.assertEqual(code, 200)
+        self.assertEqual(result["status"], "NO_ROUTE")
+        self.assertEqual(result["reason"], "NO_DIRECTED_PATH")
+        self.assertFalse(result["approved_for_movement"])
+
     def test_reverse_path_is_not_invented(self):
         code, data, _ = self.request({
             "zone": 247, "from_xyz": [2, 1, 0], "to_xyz": [0, 0, 0],

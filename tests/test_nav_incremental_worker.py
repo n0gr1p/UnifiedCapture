@@ -106,7 +106,7 @@ class NavWorkerTests(unittest.TestCase):
         with sqlite3.connect(self.nav) as db:
             self.assertEqual(
                 db.execute("SELECT DISTINCT status FROM walk_edge").fetchall(),
-                [("candidate",)])
+                [("ready",)])
 
     def test_failure_before_checkpoint_replays_idempotently(self):
         self.record("A", 1, "position", 247, 1.0, (0, 0, 0), "anchor")

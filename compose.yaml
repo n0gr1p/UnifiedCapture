@@ -12,6 +12,8 @@ services:
       - "${UCAP_BIND:-127.0.0.1}:8787:8787"
     volumes:
       - ./server-data:/data
+      # Read-only derived NAV graph on NVMe; never raw HDD telemetry.
+      - "${UCAP_NAV_DATA_DIR:-../UnifiedCapture-NavDev/nav-data}:/nav-data:ro"
     # Some hosts reject Python exec with Docker no-new-privileges enabled.
     # Keep UID 10001 and drop all Linux capabilities instead.
     cap_drop:

@@ -122,6 +122,7 @@ class RabaoRouteQueryTests(unittest.TestCase):
         self.assertEqual(data["preview"]["waypoints"],
                          [[0, 0, 0], [1, 0, 0], [2, 0, 0], [2, 1, 0]])
         self.assertEqual(data["preview"]["legs"][0]["edge_status"], "candidate")
+        self.assertEqual(data["preview"]["legs"][0]["edge_id_str"], "101")
         self.assertEqual(headers["Cache-Control"], "no-store")
         self.assertEqual(self.db_path.read_bytes(), before)
 

@@ -47,7 +47,7 @@ windower.register_event('addon command', function(command, ...)
             -- This is the same Windower client, not a cross-client broadcast.
             local event_id=arguments[1]
             windower.send_command(
-                'lua c UnifiedCombat nav-outcome-ack ' .. event_id)
+                'lua c unifiedcombat nav-outcome-ack ' .. event_id)
         else
             windower.add_to_chat(167,
                 '[UnifiedCapture] NAV outcome not recorded: ' .. tostring(reason))

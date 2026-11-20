@@ -156,7 +156,7 @@ local function begin_segment(self, file, id)
     self.entity_zone, self.menu, self.menu_counter = nil, nil, 0
     self.last_sample, self.last_flush = 0, self.env.now()
     self.session_started_at = self.env.now()
-    self:emit('session_start', {schema=2, recorder_version='0.2.4'})
+    self:emit('session_start', {schema=2, recorder_version='0.2.5'})
     self:tick(true)
 end
 function P:rotate(reason)

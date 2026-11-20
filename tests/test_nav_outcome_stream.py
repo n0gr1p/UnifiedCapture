@@ -150,6 +150,21 @@ class OutcomeStreamTests(unittest.TestCase):
         self.assertEqual(worker.source_cursor(
             self.raw,self.graph,self.state),1)
 
+    def test_duplicate_after_lost_ack_is_inert_even_if_character_moved(self):
+        self.insert(1,"nav_edge_outcome",xyz=(1,0,0),
+                    eid="tj-evt-repeat01",run="tj-run-repeat")
+        self.assertEqual(self.consume(self.stream())["outcomes_recorded"],1)
+        self.assertEqual(self.state_of_edge(),"proven")
+        self.insert(2,"nav_edge_outcome",xyz=(8,0,0),
+                    eid="tj-evt-repeat01",run="tj-run-repeat")
+        later=self.consume(self.stream(cursor=1))
+        self.assertEqual(later["outcomes_seen"],1)
+        self.assertEqual(later["outcomes_recorded"],0)
+        self.assertEqual(self.outcome_count(),1)
+        self.assertEqual(worker.source_cursor(
+            self.raw,self.graph,self.state),2)
+        self.assertEqual(self.state_of_edge(),"proven")
+
     def test_missing_or_forged_outcome_never_advances_cursor(self):
         self.insert(1,"nav_edge_outcome",xyz=(1,0,0))
         good=self.stream()

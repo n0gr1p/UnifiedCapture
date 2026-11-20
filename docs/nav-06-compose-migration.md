@@ -56,3 +56,19 @@ No `docker compose down`, no volume deletion, no broad service recreate,
 no changes to NAV-10 miner, and no automatic walking. If the updated image
 fails, restore the original `feature/navigation-readonly-queries` branch
 and rebuild only `ingest`; the HDD dataset and graph are unchanged.
+
+## NAV-04 READY / PROVEN / FAILED read compatibility (future cutover)
+
+A small, **undeployed** change in this branch allows the existing 8787
+route-query reader to inspect both UCNV v1 and v2 derived graph SQLite.
+It continues to parse `candidate` walking edges only for v1.
+For v2 it accepts READY/PROVEN walking edges and **excludes FAILED**
+walking edges from directed route calculation. Any unrecognized status
+fails closed. The external JSON response retains schema version 1
+and `approved_for_movement=false`; no new write endpoint, token, port,
+scheduler control, or permission has been introduced.
+
+The running API still uses **v1**. The separately staged
+[READY/PROVEN/FAILED lifecycle PR #21](https://github.com/n0gr1p/UnifiedCapture/pull/21)
+and its NAV-10 checkpoint handoff must be verified before any v2 switch.
+Do **not** pull and deploy a new v2 graph directly against a v1 worker.

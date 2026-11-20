@@ -140,7 +140,8 @@ def analyze(nav_db, zone=247):
         records = db.execute("""
             SELECT from_node_id,to_node_id,cost,status,evidence_count
             FROM walk_edge WHERE zone_id=?""", (zone,)).fetchall()
-        edges = [(a, b, cost) for a, b, cost, _status, _evidence in records]
+        edges = [(a, b, cost) for a, b, cost, status, _evidence in records
+                 if status in ("ready", "proven")]
         if any(a not in nodes or b not in nodes for a, b, _ in edges):
             raise ValueError("Dangling walking edge found")
         evidence = db.execute("""
@@ -233,11 +234,11 @@ def analyze(nav_db, zone=247):
             "branching_nodes": sum(outdeg[node] > 1 for node in nodes),
             "top_directed_path_candidates": route_candidates[:5],
             "path_search_limited": truncated,
-            "navigation_executable": info["release_status"] == "published"
-            and statuses.get("executable", 0) > 0,
+            "navigation_executable": False, # Query/preview never authorizes UC motion
             "safety_note": (
-                "These are historical candidate-edge graph paths, not "
-                "validated or executable walking routes."
+                "READY/PROVEN edges are navigation-eligible only after UC "
+                "implements explicit, supervised scheduler ownership. "
+                "FAILED edges are excluded from these paths."
             ),
         }
     finally:

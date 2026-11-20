@@ -48,26 +48,33 @@ def nearest_node(nodes, query, radius):
 
 
 def shortest_directed(start, goal, outgoing, max_distance):
-    """Dijkstra on recorded forward edges; no invented connections."""
-    costs = {start: 0.0}
+    """Shortest real directed distance; break equal-distance ties by PROVEN.
+
+    READY remains routable. PROVEN does not justify a longer detour, and
+    FAILED edges never appear in outgoing. Distance caps use physical yalms.
+    """
+    costs = {start: (0.0, 0)}  # (yalms, number of READY legs)
     previous = {}
-    heap = [(0.0, start)]
+    heap = [(0.0, 0, start)]
     while heap:
-        distance, node = heapq.heappop(heap)
-        if distance > costs[node] + 1e-9:
+        distance, ready_count, node = heapq.heappop(heap)
+        if (distance, ready_count) > costs[node]:
             continue
         if distance > max_distance:
             break
         if node == goal:
             break
-        for other, edge_id, length in outgoing.get(node, ()):
-            candidate = distance + length
-            if candidate > max_distance:
+        for other, edge_id, length, status in outgoing.get(node, ()):
+            candidate = (
+                distance + length,
+                ready_count + (1 if status == "ready" else 0),
+            )
+            if candidate[0] > max_distance:
                 continue
-            if candidate < costs.get(other, math.inf) - 1e-9:
+            if candidate < costs.get(other, (math.inf, math.inf)):
                 costs[other] = candidate
                 previous[other] = (node, edge_id, length)
-                heapq.heappush(heap, (candidate, other))
+                heapq.heappush(heap, (*candidate, other))
     if goal not in costs:
         raise ValueError("No directed candidate path within route-distance limit")
     route = []
@@ -81,8 +88,7 @@ def shortest_directed(start, goal, outgoing, max_distance):
             raise ValueError("Candidate route exceeds waypoint limit")
         current = parent
     route.reverse()
-    return route, costs[goal]
-
+    return route, costs[goal][0]
 
 def preview(nav_db, zone, start, goal, snap_radius=1.0,
             max_distance=100.0, max_stretch=3.0):
@@ -120,7 +126,11 @@ def preview(nav_db, zone, start, goal, snap_radius=1.0,
             FROM walk_edge WHERE zone_id=?""", (zone,)):
             if a not in nodes or b not in nodes:
                 raise ValueError("Dangling walking edge")
-            outgoing[a].append((b, eid, length))
+            if status == "failed":
+                continue  # Never route over a confirmed failed directed edge.
+            if status not in ("ready", "proven"):
+                raise ValueError("Unrecognized walking readiness state")
+            outgoing[a].append((b, eid, length, status))
             edge_status[eid] = status
         for adj in outgoing.values():
             adj.sort()
@@ -153,7 +163,8 @@ def preview(nav_db, zone, start, goal, snap_radius=1.0,
             legs.append({
                 "from_index": len(legs),
                 "to_index": len(legs) + 1,
-                "edge_id": eid,
+                "edge_id": eid,  # legacy JSON number (Lua may round)
+                "edge_id_str": str(eid),  # exact 62-bit stable identity
                 "length_yalms": round(cost, 2),
                 "edge_status": edge_status[eid],
                 "observations": len(provenance),
@@ -186,10 +197,10 @@ def preview(nav_db, zone, start, goal, snap_radius=1.0,
             "release_status": info["release_status"],
             "approved_for_movement": False,
             "safety_note": (
-                "READ-ONLY candidate preview; quantized nodes and historical "
-                "edge evidence do not establish physical walkability. "
-                "Do not execute this path in UC without independent "
-                "field validation and guarded opt-in."
+                "READ-ONLY READY/PROVEN graph preview: FAILED edges excluded. "
+                "UC may execute READY walking edges only after explicitly "
+                "armed guarded movement integration; this preview alone "
+                "never grants scheduler ownership or movement approval."
             ),
         }
     finally:

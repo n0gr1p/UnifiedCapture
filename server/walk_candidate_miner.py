@@ -4,7 +4,9 @@ Deliberately split into two privilege domains:
   extract: read-only historical HDD SQLite -> bounded JSON on stdout
   import:  JSON on stdin -> user-owned derived NVMe SQLite
 
-This is NOT executable navigation: all edges have status='candidate'.
+Accepted walking segments become READY directed edges in NAV-04 schema v2.
+Only the UC movement coordinator can later report PROVEN or confirmed FAILED.
+This mining process never dispatches movement or overrides prior edge outcomes.
 """
 import argparse
 import bisect
@@ -202,7 +204,7 @@ def import_candidates(nav_path, doc):
             count = db.execute("""
                 INSERT OR IGNORE INTO walk_edge(
                     edge_id,zone_id,from_node_id,to_node_id,cost,confidence,status)
-                VALUES (?,?,?,?,?,0.25,'candidate')""",
+                VALUES (?,?,?,?,?,0.25,'ready')""",
                 (edge_id, zone, from_id, to_id, cost)).rowcount
             if count:
                 created["edges"] += 1

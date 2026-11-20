@@ -79,10 +79,10 @@ class WalkingCandidateTests(unittest.TestCase):
         self.assertEqual(result["new_evidence"], 5)
         with sqlite3.connect(self.dst) as db:
             self.assertEqual(db.execute(
-                "SELECT count(*) FROM walk_edge WHERE status='candidate'"
+                "SELECT count(*) FROM walk_edge WHERE status='ready'"
             ).fetchone()[0], 5)
             self.assertEqual(db.execute(
-                "SELECT count(*) FROM walk_edge WHERE status='executable'"
+                "SELECT count(*) FROM walk_edge WHERE status='failed'"
             ).fetchone()[0], 0)
             self.assertEqual(db.execute(
                 "SELECT count(*) FROM evidence_ref"

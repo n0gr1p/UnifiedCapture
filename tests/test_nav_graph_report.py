@@ -27,7 +27,7 @@ class GraphReportTests(unittest.TestCase):
             db.executemany("""
                 INSERT INTO walk_edge(edge_id,zone_id,from_node_id,to_node_id,
                                       cost,confidence,status,evidence_count)
-                VALUES (?,247,?,?,1.0,0.25,'candidate',0)""",
+                VALUES (?,247,?,?,1.0,0.25,'ready',0)""",
                 [(101,1,2),(102,2,3),(103,3,2),(104,3,4)])
             db.executemany("""
                 INSERT INTO evidence_ref(
@@ -43,7 +43,7 @@ class GraphReportTests(unittest.TestCase):
         result = report.analyze(self.dbfile, 247)
         self.assertEqual(result["nodes"], 5)
         self.assertEqual(result["directed_walk_edges"], 4)
-        self.assertEqual(result["edge_statuses"], {"candidate": 4})
+        self.assertEqual(result["edge_statuses"], {"ready": 4})
         self.assertEqual(result["evidence_references"], 4)
         self.assertEqual(result["evidence_sessions"], 2)
         self.assertEqual(result["edges_with_repeat_evidence"], 1)

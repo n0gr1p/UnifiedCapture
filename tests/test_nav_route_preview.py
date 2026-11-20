@@ -27,7 +27,7 @@ class RoutePreviewTests(unittest.TestCase):
             db.executemany("""
                 INSERT INTO walk_edge(edge_id,zone_id,from_node_id,to_node_id,
                                       cost,confidence,status)
-                VALUES (?,247,?,?,?,0.25,'candidate')""",
+                VALUES (?,247,?,?,?,0.25,'ready')""",
                 [(101,1,2,1),(102,2,3,1),(103,3,4,1),
                  (104,4,3,1),(105,1,4,5)])
             db.executemany("""
@@ -48,11 +48,37 @@ class RoutePreviewTests(unittest.TestCase):
         self.assertEqual(result["waypoint_count"], 4)
         self.assertEqual(result["edges_seen_in_multiple_recording_sessions"], 1)
         self.assertEqual(result["legs"][0]["observations"], 2)
+        self.assertEqual(result["legs"][0]["edge_status"], "ready")
+        self.assertEqual(result["legs"][0]["edge_id_str"],
+                         str(result["legs"][0]["edge_id"]))
         self.assertEqual(result["legs"][0]["distinct_recording_sessions"], 2)
         self.assertEqual(result["edges_without_evidence"], 0)
         self.assertEqual(result["release_status"], "not_built")
         self.assertFalse(result["approved_for_movement"])
         self.assertEqual(self.dst.read_bytes(), before)
+
+    def test_proven_wins_exact_distance_tie_without_longer_detour(self):
+        # Two directed 3-yalm paths, only the upper one is PROVEN.
+        # It is preferred without sacrificing the shortest real distance.
+        with sqlite3.connect(self.dst) as db:
+            db.execute("PRAGMA foreign_keys=ON")
+            db.executemany("""INSERT INTO node(node_id,zone_id,x,y,z)
+                VALUES (?,247,?,?,?)""", [(6,0,1,0),(7,1,1,0)])
+            db.executemany("""INSERT INTO walk_edge(
+                edge_id,zone_id,from_node_id,to_node_id,cost,confidence,status,
+                evidence_count) VALUES (?,247,?,?,1,0.25,'proven',1)""",
+                [(106,1,6),(107,6,7),(108,7,4)])
+            db.executemany("""INSERT INTO evidence_ref(
+                walk_edge_id,source_session,source_sequence,algorithm_version)
+                VALUES (?,'uc-recording',?,'walk-candidate-v1')""",
+                [(106,30),(107,31),(108,32)])
+        p = preview.preview(self.dst,247,(0,0,0),(2,1,0))
+        self.assertEqual(p["distance_yalms"], 3)
+        self.assertEqual(p["waypoints"],
+                         [[0,0,0],[0,1,0],[1,1,0],[2,1,0]])
+        self.assertEqual([x["edge_status"] for x in p["legs"]],
+                         ["proven"] * 3)
+        self.assertFalse(p["approved_for_movement"])
 
     def test_never_invents_reverse_or_cross_zone_path(self):
         with self.assertRaisesRegex(ValueError, "No directed"):

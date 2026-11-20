@@ -117,7 +117,7 @@ class SplitPrivilegeTests(unittest.TestCase):
         self.assertEqual(result["boundaries_seen"], 1)
         with sqlite3.connect(self.nav) as db:
             self.assertEqual(db.execute("SELECT DISTINCT status FROM walk_edge").fetchall(),
-                             [("candidate",)])
+                             [("ready",)])
             self.assertEqual(db.execute(
                 "SELECT COUNT(*) FROM walk_edge w "
                 "JOIN node a ON a.node_id=w.from_node_id "
